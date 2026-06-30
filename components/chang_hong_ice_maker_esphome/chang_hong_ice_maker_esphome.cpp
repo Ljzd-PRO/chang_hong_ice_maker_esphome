@@ -704,7 +704,7 @@ float ChangHongIceMakerESPHome::calculate_blink_score_() const {
   }
 
   const float amplitude = max_value - min_value;
-  if (amplitude < 450.0f) {
+  if (amplitude < 150.0f) {
     return 0.0f;
   }
 
@@ -731,7 +731,7 @@ float ChangHongIceMakerESPHome::calculate_blink_score_() const {
   const float transition_error = std::fabs(static_cast<float>(transitions) - expected_transitions) /
                                  expected_transitions;
   const float transition_score = std::max(0.0f, 1.0f - transition_error);
-  const float amplitude_score = std::min(1.0f, (amplitude - 450.0f) / 1200.0f);
+  const float amplitude_score = std::min(1.0f, (amplitude - 150.0f) / 100.0f);
 
   const float duty = static_cast<float>(high_count) / static_cast<float>(count);
   float duty_score = 0.0f;
