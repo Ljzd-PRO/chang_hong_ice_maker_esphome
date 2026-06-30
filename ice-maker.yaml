@@ -1,0 +1,260 @@
+substitutions:
+  name: ice-maker-panel
+  friendly_name: Ice Maker Panel
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  comment: ESP32-C3 direct GPIO bridge for the five-wire ice-maker panel
+  platformio_options:
+    build_flags:
+      - -DARDUINO_USB_MODE=1
+      - -DARDUINO_USB_CDC_ON_BOOT=1
+
+esp32:
+  board: esp32-c3-devkitm-1
+  framework:
+    type: arduino
+
+logger:
+  baud_rate: 921600
+  level: DEBUG
+  logs:
+    sensor: WARN
+    text_sensor: WARN
+    binary_sensor: WARN
+
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: Ice Maker Panel Fallback
+    password: !secret fallback_ap_password
+
+captive_portal:
+
+esp32_improv:
+  authorizer: none
+  wifi_timeout: 90s
+  on_start:
+    then:
+      - logger.log:
+          level: INFO
+          tag: improv
+          format: "BLE Wi-Fi provisioning started"
+  on_provisioning:
+    then:
+      - logger.log:
+          level: INFO
+          tag: improv
+          format: "BLE Wi-Fi provisioning credentials received"
+  on_provisioned:
+    then:
+      - logger.log:
+          level: INFO
+          tag: improv
+          format: "BLE Wi-Fi provisioning completed"
+  on_stop:
+    then:
+      - logger.log:
+          level: INFO
+          tag: improv
+          format: "BLE Wi-Fi provisioning stopped"
+
+external_components:
+  - source:
+      type: local
+      path: components
+    components:
+      - ice_panel
+
+ice_panel:
+  id: ice_panel_core
+
+select:
+  - platform: template
+    id: ice_maker_mode
+    name: Ice Maker Mode
+    icon: mdi:snowflake
+    options:
+      - "Off"
+      - "Small Ice"
+      - "Large Ice"
+    update_interval: 1s
+    lambda: |-
+      if (id(ice_panel_core).mode_known()) {
+        const auto mode = id(ice_panel_core).mode_text();
+        if (!mode.empty()) {
+          return mode;
+        }
+      }
+      return {};
+    set_action:
+      - lambda: |-
+          id(ice_panel_core).request_mode(x.str());
+
+button:
+  - platform: template
+    id: ice_maker_uv_toggle
+    name: UV Toggle
+    icon: mdi:lightbulb-on-outline
+    on_press:
+      - lambda: |-
+          id(ice_panel_core).request_uv_toggle();
+
+binary_sensor:
+  - platform: template
+    id: ice_maker_action_busy
+    name: Action Busy
+    icon: mdi:progress-clock
+    entity_category: diagnostic
+    lambda: |-
+      return id(ice_panel_core).action_busy();
+
+text_sensor:
+  - platform: template
+    id: ice_maker_state
+    name: State
+    icon: mdi:state-machine
+    update_interval: 1s
+    lambda: |-
+      return {id(ice_panel_core).state_text()};
+
+  - platform: template
+    id: ice_maker_classified_state
+    name: Classified State
+    icon: mdi:state-machine
+    entity_category: diagnostic
+    update_interval: 5s
+    lambda: |-
+      return {id(ice_panel_core).classified_state_text()};
+
+  - platform: template
+    id: ice_maker_signature
+    name: ADC Signature
+    icon: mdi:pulse
+    entity_category: diagnostic
+    update_interval: 5s
+    lambda: |-
+      return {id(ice_panel_core).signature_text()};
+
+  - platform: template
+    id: ice_maker_action_state
+    name: Action State
+    icon: mdi:progress-clock
+    entity_category: diagnostic
+    update_interval: 1s
+    lambda: |-
+      return {id(ice_panel_core).action_state_text()};
+
+  - platform: template
+    id: ice_maker_action_result
+    name: Action Result
+    icon: mdi:clipboard-pulse-outline
+    entity_category: diagnostic
+    update_interval: 1s
+    lambda: |-
+      return {id(ice_panel_core).action_result_text()};
+
+sensor:
+  - platform: template
+    id: ice_maker_confidence
+    name: Confidence
+    icon: mdi:checkbox-marked-circle-outline
+    unit_of_measurement: "%"
+    accuracy_decimals: 1
+    entity_category: diagnostic
+    update_interval: 5s
+    lambda: |-
+      return id(ice_panel_core).confidence();
+
+  - platform: template
+    id: ice_maker_blink_score
+    name: Standby Blink Score
+    icon: mdi:chart-sine
+    unit_of_measurement: "%"
+    accuracy_decimals: 1
+    entity_category: diagnostic
+    update_interval: 5s
+    lambda: |-
+      return id(ice_panel_core).blink_score();
+
+  - platform: template
+    id: ice_maker_ratio_large
+    name: Ratio 0HHHH
+    icon: mdi:chart-bar
+    unit_of_measurement: "%"
+    accuracy_decimals: 1
+    entity_category: diagnostic
+    update_interval: 5s
+    lambda: |-
+      return id(ice_panel_core).ratio_large_signature();
+
+  - platform: template
+    id: ice_maker_ratio_mhmhh
+    name: Ratio MHMHH
+    icon: mdi:chart-bar
+    unit_of_measurement: "%"
+    accuracy_decimals: 1
+    entity_category: diagnostic
+    update_interval: 5s
+    lambda: |-
+      return id(ice_panel_core).ratio_mhmhh_signature();
+
+  - platform: template
+    id: ice_maker_p1_raw
+    name: P1 Raw
+    icon: mdi:sine-wave
+    accuracy_decimals: 0
+    entity_category: diagnostic
+    update_interval: 5s
+    lambda: |-
+      return id(ice_panel_core).raw_p1();
+
+  - platform: template
+    id: ice_maker_p2_raw
+    name: P2 Raw
+    icon: mdi:sine-wave
+    accuracy_decimals: 0
+    entity_category: diagnostic
+    update_interval: 5s
+    lambda: |-
+      return id(ice_panel_core).raw_p2();
+
+  - platform: template
+    id: ice_maker_p3_raw
+    name: P3 Raw
+    icon: mdi:sine-wave
+    accuracy_decimals: 0
+    entity_category: diagnostic
+    update_interval: 5s
+    lambda: |-
+      return id(ice_panel_core).raw_p3();
+
+  - platform: template
+    id: ice_maker_p4_raw
+    name: P4 Raw
+    icon: mdi:sine-wave
+    accuracy_decimals: 0
+    entity_category: diagnostic
+    update_interval: 5s
+    lambda: |-
+      return id(ice_panel_core).raw_p4();
+
+  - platform: template
+    id: ice_maker_p5_raw
+    name: P5 Raw
+    icon: mdi:sine-wave
+    accuracy_decimals: 0
+    entity_category: diagnostic
+    update_interval: 5s
+    lambda: |-
+      return id(ice_panel_core).raw_p5();
