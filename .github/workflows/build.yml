@@ -1,0 +1,87 @@
+name: Build Firmware
+
+on:
+  push:
+    branches:
+      - "**"
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      esphome_version:
+        description: "ESPHome version to install"
+        required: false
+        default: "2026.6.3"
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  ESPHOME_YAML: chang-hong-ice-maker-esphome.yaml
+  NODE_NAME: chang-hong-ice-maker-esphome
+
+jobs:
+  build:
+    name: Compile ESPHome firmware
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Cache PlatformIO and ESPHome build data
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            .esphome
+          key: esphome-${{ runner.os }}-${{ hashFiles('chang-hong-ice-maker-esphome.yaml', 'components/**') }}
+          restore-keys: |
+            esphome-${{ runner.os }}-
+
+      - name: Install ESPHome
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "esphome==${{ inputs.esphome_version || '2026.6.3' }}"
+
+      - name: Write CI secrets
+        run: |
+          cat > secrets.yaml <<'EOF'
+          wifi_ssid: "CI_WIFI"
+          wifi_password: "ci-wifi-password"
+          fallback_ap_password: "ci-fallback-password"
+          api_encryption_key: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
+          ota_password: "ci-ota-password"
+          EOF
+
+      - name: Validate ESPHome configuration
+        run: esphome config "$ESPHOME_YAML"
+
+      - name: Compile firmware
+        run: esphome compile "$ESPHOME_YAML"
+
+      - name: Collect firmware artifacts
+        run: |
+          set -euo pipefail
+          BUILD_DIR=".esphome/build/${NODE_NAME}/.pioenvs/${NODE_NAME}"
+          mkdir -p dist
+          cp -v "${BUILD_DIR}/firmware.bin" "dist/${NODE_NAME}.bin"
+          cp -v "${BUILD_DIR}/firmware.factory.bin" "dist/${NODE_NAME}.factory.bin"
+          cp -v "${BUILD_DIR}/firmware.ota.bin" "dist/${NODE_NAME}.ota.bin"
+          cp -v ".esphome/build/${NODE_NAME}/build_info.json" "dist/${NODE_NAME}.build_info.json"
+          (cd dist && sha256sum * > SHA256SUMS)
+
+      - name: Upload firmware artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: chang-hong-ice-maker-esphome-firmware
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
+

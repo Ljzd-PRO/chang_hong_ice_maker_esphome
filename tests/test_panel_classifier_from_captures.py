@@ -172,19 +172,10 @@ class FirmwareClassifier:
 
 
 class PanelClassifierCaptureTest(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls) -> None:
-        cls.archive = find_capture_archive()
-        if cls.archive is None:
-            raise unittest.SkipTest(
-                "Set ICE_PANEL_CAPTURE_ARCHIVE or place ice_panel_sniffer-captures-*.tar.gz next to this repo"
-            )
-
-    def classify_capture(self, member_name: str) -> dict[str, float | str]:
+    def classify_capture(self, archive_path: Path, member_name: str) -> dict[str, float | str]:
         classifier = FirmwareClassifier()
         rows = 0
-        assert self.archive is not None
-        with tarfile.open(self.archive, "r:gz") as archive:
+        with tarfile.open(archive_path, "r:gz") as archive:
             with archive.extractfile(member_name) as raw_file:
                 self.assertIsNotNone(raw_file, member_name)
                 assert raw_file is not None
@@ -214,9 +205,15 @@ class PanelClassifierCaptureTest(unittest.TestCase):
         self.assertEqual(bucket(4095), "H")
 
     def test_final_state_classification_from_raw_captures(self) -> None:
+        archive_path = find_capture_archive()
+        if archive_path is None:
+            self.skipTest(
+                "Set ICE_PANEL_CAPTURE_ARCHIVE or place ice_panel_sniffer-captures-*.tar.gz next to this repo"
+            )
+
         for label, (member_name, expected_state) in CAPTURES.items():
             with self.subTest(label=label):
-                result = self.classify_capture(member_name)
+                result = self.classify_capture(archive_path, member_name)
                 self.assertEqual(result["state"], expected_state, result)
 
                 if expected_state == "running_large":

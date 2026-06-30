@@ -1,0 +1,137 @@
+name: Release Firmware
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag, for example v1.0.0"
+        required: true
+        type: string
+      prerelease:
+        description: "Mark the GitHub release as a pre-release"
+        required: false
+        default: false
+        type: boolean
+      esphome_version:
+        description: "ESPHome version to install"
+        required: false
+        default: "2026.6.3"
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  ESPHOME_YAML: chang-hong-ice-maker-esphome.yaml
+  NODE_NAME: chang-hong-ice-maker-esphome
+
+jobs:
+  release:
+    name: Build and publish firmware release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Cache PlatformIO and ESPHome build data
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            .esphome
+          key: esphome-release-${{ runner.os }}-${{ hashFiles('chang-hong-ice-maker-esphome.yaml', 'components/**') }}
+          restore-keys: |
+            esphome-release-${{ runner.os }}-
+            esphome-${{ runner.os }}-
+
+      - name: Install ESPHome
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "esphome==${{ inputs.esphome_version || '2026.6.3' }}"
+
+      - name: Write CI secrets
+        run: |
+          cat > secrets.yaml <<'EOF'
+          wifi_ssid: "CI_WIFI"
+          wifi_password: "ci-wifi-password"
+          fallback_ap_password: "ci-fallback-password"
+          api_encryption_key: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
+          ota_password: "ci-ota-password"
+          EOF
+
+      - name: Validate ESPHome configuration
+        run: esphome config "$ESPHOME_YAML"
+
+      - name: Compile firmware
+        run: esphome compile "$ESPHOME_YAML"
+
+      - name: Collect firmware artifacts
+        run: |
+          set -euo pipefail
+          BUILD_DIR=".esphome/build/${NODE_NAME}/.pioenvs/${NODE_NAME}"
+          mkdir -p dist
+          cp -v "${BUILD_DIR}/firmware.bin" "dist/${NODE_NAME}.bin"
+          cp -v "${BUILD_DIR}/firmware.factory.bin" "dist/${NODE_NAME}.factory.bin"
+          cp -v "${BUILD_DIR}/firmware.ota.bin" "dist/${NODE_NAME}.ota.bin"
+          cp -v ".esphome/build/${NODE_NAME}/build_info.json" "dist/${NODE_NAME}.build_info.json"
+          (cd dist && sha256sum * > SHA256SUMS)
+
+      - name: Upload firmware workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: chang-hong-ice-maker-esphome-release-firmware
+          path: dist/
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Determine release metadata
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
+            release_tag="${GITHUB_REF_NAME}"
+            prerelease="false"
+          else
+            release_tag="${{ inputs.tag }}"
+            prerelease="${{ inputs.prerelease }}"
+          fi
+
+          echo "RELEASE_TAG=${release_tag}" >> "$GITHUB_ENV"
+          echo "RELEASE_PRERELEASE=${prerelease}" >> "$GITHUB_ENV"
+          cat > release-notes.md <<EOF
+          Automated ESPHome firmware build for \`${release_tag}\`.
+
+          Artifacts:
+          - \`${NODE_NAME}.factory.bin\`: first USB/serial flash image
+          - \`${NODE_NAME}.ota.bin\`: OTA update image
+          - \`${NODE_NAME}.bin\`: raw firmware image
+          - \`${NODE_NAME}.build_info.json\`: ESPHome build metadata
+          - \`SHA256SUMS\`: artifact checksums
+          EOF
+
+      - name: Create or update GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" dist/* --clobber
+          else
+            args=("$RELEASE_TAG" dist/* --title "$RELEASE_TAG" --notes-file release-notes.md)
+            if [[ "$RELEASE_PRERELEASE" == "true" ]]; then
+              args+=(--prerelease)
+            fi
+            gh release create "${args[@]}"
+          fi
+

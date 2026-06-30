@@ -1,0 +1,41 @@
+name: Tests
+
+on:
+  push:
+    branches:
+      - "**"
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      capture_archive_url:
+        description: "Optional URL for ice_panel_sniffer-captures-*.tar.gz to run full raw-capture regression"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  python-tests:
+    name: Python classifier tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Download optional raw capture archive
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.capture_archive_url != '' }}
+        run: |
+          curl --fail --location --retry 3 \
+            "${{ inputs.capture_archive_url }}" \
+            --output ../ice_panel_sniffer-captures-ci.tar.gz
+
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -v
+
