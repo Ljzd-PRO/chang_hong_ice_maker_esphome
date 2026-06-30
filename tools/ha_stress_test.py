@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Small Home Assistant stress test for the ESPHome ice-maker panel."""
+"""Small Home Assistant stress test for ChangHongIceMakerESPHome."""
 
 from __future__ import annotations
 
@@ -12,16 +12,16 @@ import urllib.request
 
 
 WATCH_ENTITIES = [
-    "select.ice_maker_panel_ice_maker_mode",
-    "button.ice_maker_panel_uv_toggle",
-    "sensor.ice_maker_panel_state",
-    "sensor.ice_maker_panel_classified_state",
-    "sensor.ice_maker_panel_action_state",
-    "sensor.ice_maker_panel_action_result",
-    "binary_sensor.ice_maker_panel_action_busy",
-    "sensor.ice_maker_panel_adc_signature",
-    "sensor.ice_maker_panel_confidence",
-    "sensor.ice_maker_panel_standby_blink_score",
+    "select.chang_hong_ice_maker_esphome_mode",
+    "button.chang_hong_ice_maker_esphome_uv_toggle",
+    "sensor.chang_hong_ice_maker_esphome_state",
+    "sensor.chang_hong_ice_maker_esphome_classified_state",
+    "sensor.chang_hong_ice_maker_esphome_action_state",
+    "sensor.chang_hong_ice_maker_esphome_action_result",
+    "binary_sensor.chang_hong_ice_maker_esphome_action_busy",
+    "sensor.chang_hong_ice_maker_esphome_adc_signature",
+    "sensor.chang_hong_ice_maker_esphome_confidence",
+    "sensor.chang_hong_ice_maker_esphome_standby_blink_score",
 ]
 
 
@@ -86,13 +86,13 @@ def run_no_load(ha: HomeAssistant):
         ha.call_service(
             "select",
             "select_option",
-            {"entity_id": "select.ice_maker_panel_ice_maker_mode", "option": option},
+            {"entity_id": "select.chang_hong_ice_maker_esphome_mode", "option": option},
         )
         time.sleep(0.25)
     snapshot(ha, "after rapid mode")
 
     for _ in range(5):
-        ha.call_service("button", "press", {"entity_id": "button.ice_maker_panel_uv_toggle"})
+        ha.call_service("button", "press", {"entity_id": "button.chang_hong_ice_maker_esphome_uv_toggle"})
         time.sleep(0.2)
     snapshot(ha, "during uv spam")
 
@@ -100,13 +100,13 @@ def run_no_load(ha: HomeAssistant):
     ha.call_service(
         "select",
         "select_option",
-        {"entity_id": "select.ice_maker_panel_ice_maker_mode", "option": "Large Ice"},
+        {"entity_id": "select.chang_hong_ice_maker_esphome_mode", "option": "Large Ice"},
     )
     snapshot(ha, "mode during uv")
 
     time.sleep(7.0)
     snapshot(ha, "after uv cooldown")
-    ha.call_service("button", "press", {"entity_id": "button.ice_maker_panel_uv_toggle"})
+    ha.call_service("button", "press", {"entity_id": "button.chang_hong_ice_maker_esphome_uv_toggle"})
     time.sleep(1.3)
     snapshot(ha, "second uv accepted")
     time.sleep(7.0)

@@ -5,12 +5,14 @@ from esphome.const import CONF_ID
 CODEOWNERS = ["@local"]
 DEPENDENCIES = ["wifi"]
 
-ice_panel_ns = cg.esphome_ns.namespace("ice_panel")
-IcePanel = ice_panel_ns.class_("IcePanel", cg.Component)
+chang_hong_ice_maker_esphome_ns = cg.esphome_ns.namespace("chang_hong_ice_maker_esphome")
+ChangHongIceMakerESPHome = chang_hong_ice_maker_esphome_ns.class_(
+    "ChangHongIceMakerESPHome", cg.Component
+)
 
 CONFIG_SCHEMA = cv.Schema(
     {
-        cv.GenerateID(): cv.declare_id(IcePanel),
+        cv.GenerateID(): cv.declare_id(ChangHongIceMakerESPHome),
     }
 ).extend(cv.COMPONENT_SCHEMA)
 

@@ -9,7 +9,7 @@
 #include <string>
 
 namespace esphome {
-namespace ice_panel {
+namespace chang_hong_ice_maker_esphome {
 
 enum class PanelState : uint8_t {
   UNKNOWN = 0,
@@ -20,7 +20,7 @@ enum class PanelState : uint8_t {
   STOPPING,
 };
 
-class IcePanel : public Component {
+class ChangHongIceMakerESPHome : public Component {
  public:
   void setup() override;
   void loop() override;
@@ -171,5 +171,5 @@ class IcePanel : public Component {
   wifi::SavedWifiSettings last_fixed_wifi_saved_{};
 };
 
-}  // namespace ice_panel
+}  // namespace chang_hong_ice_maker_esphome
 }  // namespace esphome

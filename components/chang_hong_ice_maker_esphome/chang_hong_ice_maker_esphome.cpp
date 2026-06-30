@@ -1,4 +1,4 @@
-#include "ice_panel.h"
+#include "chang_hong_ice_maker_esphome.h"
 
 #include "esphome/core/log.h"
 
@@ -10,11 +10,11 @@
 #include <cstring>
 
 namespace esphome {
-namespace ice_panel {
+namespace chang_hong_ice_maker_esphome {
 
-static const char *const TAG = "ice_panel";
+static const char *const TAG = "chang_hong_ice_maker_esphome";
 
-void IcePanel::setup() {
+void ChangHongIceMakerESPHome::setup() {
   this->setup_fixed_wifi_preferences_();
 
   this->current_bin_started_ms_ = millis();
@@ -22,7 +22,7 @@ void IcePanel::setup() {
   this->valid_bins_ = 1;
   this->configure_inputs_only_();
 
-  ESP_LOGI(TAG, "Ice panel direct GPIO mode starting");
+  ESP_LOGI(TAG, "ChangHongIceMakerESPHome direct GPIO mode starting");
   ESP_LOGI(TAG, "GPIO mapping: P1=GPIO0 P2=GPIO1 P3=GPIO2 P4=GPIO3 P5=GPIO4");
   ESP_LOGI(TAG, "ADC sample interval=%u us, window=%u ms, bins=%u",
            SAMPLE_INTERVAL_US, BIN_INTERVAL_MS * BIN_COUNT, BIN_COUNT);
@@ -30,8 +30,8 @@ void IcePanel::setup() {
   ESP_LOGW(TAG, "Direct floating GPIO mode is accepted-risk; keep panel pins input-only except explicit pulses");
 }
 
-void IcePanel::dump_config() {
-  ESP_LOGCONFIG(TAG, "Ice Maker Panel");
+void ChangHongIceMakerESPHome::dump_config() {
+  ESP_LOGCONFIG(TAG, "Chang Hong Ice Maker ESPHome");
   ESP_LOGCONFIG(TAG, "  P1: GPIO%u", this->pins_[0]);
   ESP_LOGCONFIG(TAG, "  P2: GPIO%u", this->pins_[1]);
   ESP_LOGCONFIG(TAG, "  P3: GPIO%u", this->pins_[2]);
@@ -40,7 +40,7 @@ void IcePanel::dump_config() {
   ESP_LOGCONFIG(TAG, "  Sampling: 1 kHz ADC, 32 s rolling signature window");
 }
 
-void IcePanel::loop() {
+void ChangHongIceMakerESPHome::loop() {
   const uint32_t now_ms = millis();
   const uint32_t now_us = micros();
 
@@ -70,7 +70,7 @@ void IcePanel::loop() {
   this->service_fixed_wifi_preferences_();
 }
 
-bool IcePanel::request_power(bool target_on) {
+bool ChangHongIceMakerESPHome::request_power(bool target_on) {
   if (this->pulse_active_) {
     this->record_event_(std::string("refused_pulse_") + pulse_to_action_cstr_(this->pulse_kind_));
     ESP_LOGW(TAG, "Power request ignored: pulse already active (%s)", pulse_to_action_cstr_(this->pulse_kind_));
@@ -118,7 +118,7 @@ bool IcePanel::request_power(bool target_on) {
   return true;
 }
 
-bool IcePanel::request_large_ice(bool target_large) {
+bool ChangHongIceMakerESPHome::request_large_ice(bool target_large) {
   if (this->pulse_active_) {
     this->record_event_(std::string("refused_pulse_") + pulse_to_action_cstr_(this->pulse_kind_));
     ESP_LOGW(TAG, "Size request ignored: pulse already active (%s)", pulse_to_action_cstr_(this->pulse_kind_));
@@ -165,7 +165,7 @@ bool IcePanel::request_large_ice(bool target_large) {
   return true;
 }
 
-bool IcePanel::request_mode(const std::string &target_mode) {
+bool ChangHongIceMakerESPHome::request_mode(const std::string &target_mode) {
   if (target_mode == "Off") {
     this->pending_mode_after_power_on_ = PendingMode::NONE;
     return this->request_power(false);
@@ -229,7 +229,7 @@ bool IcePanel::request_mode(const std::string &target_mode) {
   return false;
 }
 
-bool IcePanel::request_uv_toggle() {
+bool ChangHongIceMakerESPHome::request_uv_toggle() {
   if (this->pulse_active_) {
     this->record_event_(std::string("refused_pulse_") + pulse_to_action_cstr_(this->pulse_kind_));
     ESP_LOGW(TAG, "UV toggle ignored: pulse already active (%s)", pulse_to_action_cstr_(this->pulse_kind_));
@@ -239,14 +239,14 @@ bool IcePanel::request_uv_toggle() {
   return this->start_pulse_(PulseKind::SW2_HOLD_OD, 2, 5000);
 }
 
-bool IcePanel::power_known() const {
+bool ChangHongIceMakerESPHome::power_known() const {
   if (this->exposed_state_ == PanelState::STARTING || this->exposed_state_ == PanelState::STOPPING) {
     return true;
   }
   return this->exposed_state_ == PanelState::STANDBY || is_running_(this->exposed_state_);
 }
 
-bool IcePanel::power_on() const {
+bool ChangHongIceMakerESPHome::power_on() const {
   if (this->optimistic_kind_ == OptimisticKind::POWER &&
       static_cast<int32_t>(millis() - this->optimistic_until_ms_) < 0) {
     return this->optimistic_power_on_;
@@ -260,7 +260,7 @@ bool IcePanel::power_on() const {
   return is_running_(this->exposed_state_);
 }
 
-bool IcePanel::size_known() const {
+bool ChangHongIceMakerESPHome::size_known() const {
   if ((this->optimistic_kind_ == OptimisticKind::SIZE || this->optimistic_kind_ == OptimisticKind::MODE) &&
       static_cast<int32_t>(millis() - this->optimistic_until_ms_) < 0) {
     return this->optimistic_mode_ == PendingMode::SMALL || this->optimistic_mode_ == PendingMode::LARGE;
@@ -269,7 +269,7 @@ bool IcePanel::size_known() const {
          this->exposed_state_ == PanelState::RUNNING_SMALL;
 }
 
-bool IcePanel::large_ice() const {
+bool ChangHongIceMakerESPHome::large_ice() const {
   if ((this->optimistic_kind_ == OptimisticKind::SIZE || this->optimistic_kind_ == OptimisticKind::MODE) &&
       static_cast<int32_t>(millis() - this->optimistic_until_ms_) < 0) {
     return this->optimistic_mode_ == PendingMode::LARGE;
@@ -277,19 +277,19 @@ bool IcePanel::large_ice() const {
   return this->exposed_state_ == PanelState::RUNNING_LARGE;
 }
 
-bool IcePanel::mode_known() const {
+bool ChangHongIceMakerESPHome::mode_known() const {
   return this->power_known() || this->size_known();
 }
 
-std::string IcePanel::state_text() const {
+std::string ChangHongIceMakerESPHome::state_text() const {
   return state_to_cstr_(this->exposed_state_);
 }
 
-std::string IcePanel::classified_state_text() const {
+std::string ChangHongIceMakerESPHome::classified_state_text() const {
   return state_to_cstr_(this->classified_state_);
 }
 
-std::string IcePanel::mode_text() const {
+std::string ChangHongIceMakerESPHome::mode_text() const {
   if (!this->power_known()) {
     return "";
   }
@@ -302,11 +302,11 @@ std::string IcePanel::mode_text() const {
   return this->large_ice() ? "Large Ice" : "Small Ice";
 }
 
-std::string IcePanel::signature_text() const {
+std::string ChangHongIceMakerESPHome::signature_text() const {
   return std::string(this->last_signature_);
 }
 
-std::string IcePanel::action_state_text() const {
+std::string ChangHongIceMakerESPHome::action_state_text() const {
   if (this->pulse_active_) {
     return std::string("pulse_") + pulse_to_action_cstr_(this->pulse_kind_);
   }
@@ -323,16 +323,16 @@ std::string IcePanel::action_state_text() const {
   return "idle";
 }
 
-std::string IcePanel::action_result_text() const {
+std::string ChangHongIceMakerESPHome::action_result_text() const {
   return this->last_event_;
 }
 
-bool IcePanel::action_busy() const {
+bool ChangHongIceMakerESPHome::action_busy() const {
   return this->pulse_active_ || this->pending_mode_after_power_on_ != PendingMode::NONE ||
          this->optimistic_active_();
 }
 
-void IcePanel::setup_fixed_wifi_preferences_() {
+void ChangHongIceMakerESPHome::setup_fixed_wifi_preferences_() {
   if (global_preferences == nullptr) {
     ESP_LOGW(TAG, "Fixed Wi-Fi credential store unavailable: preferences not initialized");
     return;
@@ -362,7 +362,7 @@ void IcePanel::setup_fixed_wifi_preferences_() {
   ESP_LOGI(TAG, "Restored fixed Wi-Fi credentials for SSID '%s'", settings.ssid);
 }
 
-void IcePanel::service_fixed_wifi_preferences_() {
+void ChangHongIceMakerESPHome::service_fixed_wifi_preferences_() {
   const uint32_t now = millis();
   if (static_cast<uint32_t>(now - this->last_fixed_wifi_sync_ms_) < FIXED_WIFI_SYNC_INTERVAL_MS) {
     return;
@@ -398,7 +398,7 @@ void IcePanel::service_fixed_wifi_preferences_() {
   }
 }
 
-bool IcePanel::load_fixed_wifi_settings_(wifi::SavedWifiSettings *settings) {
+bool ChangHongIceMakerESPHome::load_fixed_wifi_settings_(wifi::SavedWifiSettings *settings) {
   if (!this->fixed_wifi_pref_ready_ || settings == nullptr) {
     return false;
   }
@@ -412,7 +412,7 @@ bool IcePanel::load_fixed_wifi_settings_(wifi::SavedWifiSettings *settings) {
   return true;
 }
 
-bool IcePanel::save_fixed_wifi_settings_(const wifi::SavedWifiSettings &settings) {
+bool ChangHongIceMakerESPHome::save_fixed_wifi_settings_(const wifi::SavedWifiSettings &settings) {
   if (!this->fixed_wifi_pref_ready_ || !fixed_wifi_settings_valid_(settings)) {
     return false;
   }
@@ -424,7 +424,7 @@ bool IcePanel::save_fixed_wifi_settings_(const wifi::SavedWifiSettings &settings
   return saved;
 }
 
-bool IcePanel::fixed_wifi_settings_valid_(const wifi::SavedWifiSettings &settings) {
+bool ChangHongIceMakerESPHome::fixed_wifi_settings_valid_(const wifi::SavedWifiSettings &settings) {
   if (settings.ssid[0] == '\0') {
     return false;
   }
@@ -437,21 +437,21 @@ bool IcePanel::fixed_wifi_settings_valid_(const wifi::SavedWifiSettings &setting
   return true;
 }
 
-bool IcePanel::wifi_value_equals_(const char *lhs, const char *rhs) {
+bool ChangHongIceMakerESPHome::wifi_value_equals_(const char *lhs, const char *rhs) {
   if (lhs == nullptr || rhs == nullptr) {
     return lhs == rhs;
   }
   return std::strcmp(lhs, rhs) == 0;
 }
 
-void IcePanel::configure_inputs_only_() {
+void ChangHongIceMakerESPHome::configure_inputs_only_() {
   for (uint8_t pin : this->pins_) {
     gpio_reset_pin(static_cast<gpio_num_t>(pin));
   }
   this->restore_panel_inputs_();
 }
 
-void IcePanel::restore_panel_inputs_() {
+void ChangHongIceMakerESPHome::restore_panel_inputs_() {
   for (uint8_t pin : this->pins_) {
     const gpio_num_t gpio = static_cast<gpio_num_t>(pin);
     gpio_set_level(gpio, 0);
@@ -464,7 +464,7 @@ void IcePanel::restore_panel_inputs_() {
   analogSetAttenuation(ADC_11db);
 }
 
-bool IcePanel::start_pulse_(PulseKind kind, uint8_t pin_index, uint32_t duration_ms) {
+bool ChangHongIceMakerESPHome::start_pulse_(PulseKind kind, uint8_t pin_index, uint32_t duration_ms) {
   if (pin_index >= PIN_COUNT || this->pulse_active_) {
     return false;
   }
@@ -493,7 +493,7 @@ bool IcePanel::start_pulse_(PulseKind kind, uint8_t pin_index, uint32_t duration
   return true;
 }
 
-void IcePanel::finish_pulse_() {
+void ChangHongIceMakerESPHome::finish_pulse_() {
   const PulseKind finished = this->pulse_kind_;
   const uint8_t pin_index = this->pulse_pin_index_;
   const uint32_t duration_ms = this->pulse_duration_ms_;
@@ -510,7 +510,7 @@ void IcePanel::finish_pulse_() {
            finished == PulseKind::SW2_HOLD_OD ? UV_COOLDOWN_MS : SHORT_PRESS_COOLDOWN_MS);
 }
 
-void IcePanel::service_pending_mode_() {
+void ChangHongIceMakerESPHome::service_pending_mode_() {
   if (this->pending_mode_after_power_on_ == PendingMode::NONE || this->pulse_active_) {
     return;
   }
@@ -547,7 +547,7 @@ void IcePanel::service_pending_mode_() {
   }
 }
 
-void IcePanel::sample_once_() {
+void ChangHongIceMakerESPHome::sample_once_() {
   char signature[6] = {'x', 'x', 'x', 'x', 'x', '\0'};
   for (uint8_t i = 0; i < PIN_COUNT; i++) {
     const uint16_t raw = static_cast<uint16_t>(analogRead(this->pins_[i]));
@@ -570,7 +570,7 @@ void IcePanel::sample_once_() {
   }
 }
 
-void IcePanel::advance_bin_if_needed_() {
+void ChangHongIceMakerESPHome::advance_bin_if_needed_() {
   const uint32_t now = millis();
   while (static_cast<uint32_t>(now - this->current_bin_started_ms_) >= BIN_INTERVAL_MS) {
     this->current_bin_started_ms_ += BIN_INTERVAL_MS;
@@ -582,7 +582,7 @@ void IcePanel::advance_bin_if_needed_() {
   }
 }
 
-void IcePanel::reset_bin_(uint8_t index) {
+void ChangHongIceMakerESPHome::reset_bin_(uint8_t index) {
   this->bins_[index].valid = true;
   this->bins_[index].total = 0;
   this->bins_[index].sig_0hhhh = 0;
@@ -590,7 +590,7 @@ void IcePanel::reset_bin_(uint8_t index) {
   this->bins_[index].raw_sum.fill(0);
 }
 
-void IcePanel::evaluate_() {
+void ChangHongIceMakerESPHome::evaluate_() {
   uint32_t total = 0;
   uint32_t sig_large = 0;
   uint32_t sig_mhmhh = 0;
@@ -637,7 +637,7 @@ void IcePanel::evaluate_() {
   this->update_exposed_state_(classified, millis());
 }
 
-void IcePanel::update_exposed_state_(PanelState classified, uint32_t now_ms) {
+void ChangHongIceMakerESPHome::update_exposed_state_(PanelState classified, uint32_t now_ms) {
   if (this->optimistic_kind_ == OptimisticKind::NONE) {
     this->exposed_state_ = classified;
     return;
@@ -679,7 +679,7 @@ void IcePanel::update_exposed_state_(PanelState classified, uint32_t now_ms) {
   this->exposed_state_ = this->optimistic_state_;
 }
 
-float IcePanel::calculate_blink_score_() const {
+float ChangHongIceMakerESPHome::calculate_blink_score_() const {
   std::array<float, BIN_COUNT> p1_means{};
   uint8_t count = 0;
 
@@ -746,7 +746,7 @@ float IcePanel::calculate_blink_score_() const {
   return 100.0f * amplitude_score * transition_score * duty_score;
 }
 
-void IcePanel::log_summary_(bool force) {
+void ChangHongIceMakerESPHome::log_summary_(bool force) {
   uint32_t total = 0;
   std::array<uint64_t, PIN_COUNT> sums{};
   for (const auto &bin : this->bins_) {
@@ -778,7 +778,7 @@ void IcePanel::log_summary_(bool force) {
            this->blink_score_, this->confidence_, p1, p2, p3, p4, p5);
 }
 
-char IcePanel::bucket_(uint16_t value) const {
+char ChangHongIceMakerESPHome::bucket_(uint16_t value) const {
   if (value < 100) {
     return '0';
   }
@@ -791,26 +791,26 @@ char IcePanel::bucket_(uint16_t value) const {
   return 'x';
 }
 
-bool IcePanel::signature_is_0hhhh_(const char *signature) const {
+bool ChangHongIceMakerESPHome::signature_is_0hhhh_(const char *signature) const {
   return signature[0] == '0' && signature[1] == 'H' && signature[2] == 'H' &&
          signature[3] == 'H' && signature[4] == 'H';
 }
 
-bool IcePanel::signature_is_mhmhh_(const char *signature) const {
+bool ChangHongIceMakerESPHome::signature_is_mhmhh_(const char *signature) const {
   return signature[0] == 'M' && signature[1] == 'H' && signature[2] == 'M' &&
          signature[3] == 'H' && signature[4] == 'H';
 }
 
-bool IcePanel::optimistic_active_() const {
+bool ChangHongIceMakerESPHome::optimistic_active_() const {
   return this->optimistic_kind_ != OptimisticKind::NONE &&
          static_cast<int32_t>(millis() - this->optimistic_until_ms_) < 0;
 }
 
-bool IcePanel::cooldown_active_() const {
+bool ChangHongIceMakerESPHome::cooldown_active_() const {
   return static_cast<int32_t>(millis() - this->cooldown_until_ms_) < 0;
 }
 
-bool IcePanel::set_pending_mode_target_(PendingMode target) {
+bool ChangHongIceMakerESPHome::set_pending_mode_target_(PendingMode target) {
   if (target != PendingMode::SMALL && target != PendingMode::LARGE) {
     return false;
   }
@@ -825,12 +825,12 @@ bool IcePanel::set_pending_mode_target_(PendingMode target) {
   return true;
 }
 
-void IcePanel::record_event_(const std::string &event) {
+void ChangHongIceMakerESPHome::record_event_(const std::string &event) {
   this->last_event_ = event;
   this->last_event_ms_ = millis();
 }
 
-const char *IcePanel::state_to_cstr_(PanelState state) {
+const char *ChangHongIceMakerESPHome::state_to_cstr_(PanelState state) {
   switch (state) {
     case PanelState::STANDBY:
       return "standby";
@@ -848,7 +848,7 @@ const char *IcePanel::state_to_cstr_(PanelState state) {
   }
 }
 
-const char *IcePanel::pulse_to_action_cstr_(PulseKind kind) {
+const char *ChangHongIceMakerESPHome::pulse_to_action_cstr_(PulseKind kind) {
   switch (kind) {
     case PulseKind::SW1_OD:
       return "sw1";
@@ -862,7 +862,7 @@ const char *IcePanel::pulse_to_action_cstr_(PulseKind kind) {
   }
 }
 
-const char *IcePanel::pending_mode_to_cstr_(PendingMode mode) {
+const char *ChangHongIceMakerESPHome::pending_mode_to_cstr_(PendingMode mode) {
   switch (mode) {
     case PendingMode::SMALL:
       return "small";
@@ -874,9 +874,9 @@ const char *IcePanel::pending_mode_to_cstr_(PendingMode mode) {
   }
 }
 
-bool IcePanel::is_running_(PanelState state) {
+bool ChangHongIceMakerESPHome::is_running_(PanelState state) {
   return state == PanelState::RUNNING_LARGE || state == PanelState::RUNNING_SMALL;
 }
 
-}  // namespace ice_panel
+}  // namespace chang_hong_ice_maker_esphome
 }  // namespace esphome

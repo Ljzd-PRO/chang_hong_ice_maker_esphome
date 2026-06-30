@@ -1,4 +1,4 @@
-# ESPHome Ice Maker Panel
+# ChangHongIceMakerESPHome
 
 This ESPHome project turns the reverse-engineered five-wire ice-maker panel
 into a Home Assistant device.
@@ -26,16 +26,16 @@ UV toggle:          P3/GPIO2 open-drain low for 5000 ms
 
 ## Home Assistant Entities
 
-- `select.ice_maker_mode`: `Off`, `Small Ice`, or `Large Ice`.
-- `button.ice_maker_uv_toggle`: long-presses Select for UV toggle. UV has no
+- `select.chang_hong_ice_maker_esphome_mode`: `Off`, `Small Ice`, or `Large Ice`.
+- `button.chang_hong_ice_maker_esphome_uv_toggle`: long-presses Select for UV toggle. UV has no
   panel feedback, so it is intentionally not exposed as a stateful switch.
-- `text_sensor.ice_maker_state`: `standby`, `running_large`, `running_small`,
+- `sensor.chang_hong_ice_maker_esphome_state`: `standby`, `running_large`, `running_small`,
   `starting`, `stopping`, or `unknown`.
-- `binary_sensor.ice_maker_action_busy`: on while a GPIO pulse, startup follow-up,
+- `binary_sensor.chang_hong_ice_maker_esphome_action_busy`: on while a GPIO pulse, startup follow-up,
   or optimistic confirmation window is active.
-- `text_sensor.ice_maker_action_state`: `idle`, active pulse name, pending startup
+- `sensor.chang_hong_ice_maker_esphome_action_state`: `idle`, active pulse name, pending startup
   target, confirmation state, or recent refusal/timeout.
-- `text_sensor.ice_maker_action_result`: last action, refusal, confirmation, or
+- `sensor.chang_hong_ice_maker_esphome_action_result`: last action, refusal, confirmation, or
   timeout event. Examples: `pulse_uv_begin`, `refused_unknown_state`,
   `confirmed_running_large`.
 - Diagnostic entities expose the latest ADC signature, confidence, blink score,
@@ -99,7 +99,7 @@ The firmware supports both fallback Wi-Fi provisioning and BLE Improv
 provisioning. Daily control still uses ESPHome Native API over Wi-Fi; Bluetooth
 is only for setting or replacing Wi-Fi credentials.
 
-The `ice_panel` component also keeps an extra copy of the currently connected
+The `chang_hong_ice_maker_esphome` component also keeps an extra copy of the currently connected
 Wi-Fi credentials in a fixed preference slot. On boot, that fixed slot is loaded
 before ESPHome Wi-Fi starts, so credentials entered through fallback AP or BLE
 Improv survive later firmware changes whose ESPHome config hash changes. When
@@ -110,7 +110,7 @@ Fallback AP path:
 
 1. Power the ESP32-C3.
 2. If it cannot join the saved Wi-Fi, wait about 90 seconds.
-3. Connect a phone or computer to `Ice Maker Panel Fallback`.
+3. Connect a phone or computer to `ChangHongIceMakerESPHome AP`.
 4. Open `http://192.168.4.1/`.
 5. Enter the home Wi-Fi SSID and password.
 
@@ -120,7 +120,7 @@ BLE Improv path:
 2. If it cannot join the saved Wi-Fi, wait about 90 seconds.
 3. On Android, macOS, or Windows, open Chrome or Edge.
 4. Visit `https://www.improv-wifi.com/`.
-5. Connect to the BLE device named like `ice-maker-panel`.
+5. Connect to the BLE device named like `chang-hong-ice-maker-esphome`.
 6. Enter the home Wi-Fi SSID and password.
 
 The current configuration uses `esp32_improv.authorizer: none` because the ice
@@ -131,9 +131,9 @@ maker panel buttons are already reserved for machine control.
 Flash while the ESP32-C3 is not connected to the ice maker:
 
 ```sh
-.venv-esphome/bin/esphome config ice_panel_esphome/ice-maker.yaml
-.venv-esphome/bin/esphome compile ice_panel_esphome/ice-maker.yaml
-.venv-esphome/bin/esphome run ice_panel_esphome/ice-maker.yaml --device /dev/cu.usbmodem11301
+.venv-esphome/bin/esphome config chang_hong_ice_maker_esphome/chang-hong-ice-maker-esphome.yaml
+.venv-esphome/bin/esphome compile chang_hong_ice_maker_esphome/chang-hong-ice-maker-esphome.yaml
+.venv-esphome/bin/esphome run chang_hong_ice_maker_esphome/chang-hong-ice-maker-esphome.yaml --device /dev/cu.usbmodem11301
 ```
 
 If the serial port changes:
@@ -152,7 +152,8 @@ DEBUG level
 ## Hardware Test Flow
 
 1. Flash and boot ESP32-C3 without the ice maker connected. Logs should show
-   `Ice panel direct GPIO mode starting`; state should be `unknown`.
+   `ChangHongIceMakerESPHome direct GPIO mode starting`; state should be
+   `unknown`.
 2. Turn off the ice maker AC power and wait 30 seconds.
 3. Connect `P1-P5 -> GPIO0-GPIO4`; do not connect ice-maker GND.
 4. Power the ice maker and wait in standby for at least 30 seconds. The state
@@ -179,23 +180,28 @@ protects the original panel scanner from back-to-back Home Assistant calls.
 The local Docker Home Assistant test instance can be exercised with:
 
 ```sh
-.venv-esphome/bin/python ice_panel_esphome/tools/ha_stress_test.py --scenario no-load
+.venv-esphome/bin/python chang_hong_ice_maker_esphome/tools/ha_stress_test.py --scenario no-load
 ```
 
 No-load expected behavior, with the ESP32-C3 not connected to the ice maker:
 
 ```text
-select.ice_maker_panel_ice_maker_mode -> unknown
-sensor.ice_maker_panel_state          -> unknown
+select.chang_hong_ice_maker_esphome_mode -> unknown
+sensor.chang_hong_ice_maker_esphome_state          -> unknown
 mode changes                          -> refused_unknown_state
 UV spam                               -> one pulse_uv, later calls refused_pulse_uv
 UV during mode changes                -> mode calls refused_pulse_uv
 ```
 
+If a reused Home Assistant test instance keeps previous entity IDs after this
+rename, the firmware has still been renamed; Home Assistant is preserving entity
+registry IDs for existing unique IDs. Remove or rename the stale HA registry
+entries, then reload the ESPHome integration.
+
 Latest no-load validation:
 
 ```text
-2026-06-30 11:19 Asia/Shanghai
+2026-06-30 11:56 Asia/Shanghai
 ESP32-C3 IP: 192.168.100.24
 Result: passed
 Rapid mode while unknown: refused_unknown_state, no pulse
