@@ -109,7 +109,13 @@ select:
       return {};
     set_action:
       - lambda: |-
-          id(chang_hong_ice_maker_esphome_core).request_mode(x.str());
+          const bool accepted = id(chang_hong_ice_maker_esphome_core).request_mode(x.str());
+          const auto mode = id(chang_hong_ice_maker_esphome_core).mode_text();
+          if (!mode.empty()) {
+            id(chang_hong_ice_maker_esphome_mode).publish_state(mode);
+          } else if (accepted) {
+            id(chang_hong_ice_maker_esphome_mode).publish_state(x.str());
+          }
 
 button:
   - platform: template

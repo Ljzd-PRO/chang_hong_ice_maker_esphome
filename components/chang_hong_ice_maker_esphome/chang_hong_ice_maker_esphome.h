@@ -71,6 +71,7 @@ class ChangHongIceMakerESPHome : public Component {
   static constexpr uint32_t RECENT_EVENT_VISIBLE_MS = 5000;
   static constexpr uint32_t SHORT_PRESS_COOLDOWN_MS = 800;
   static constexpr uint32_t UV_COOLDOWN_MS = 1500;
+  static constexpr uint8_t UV_QUEUE_MAX = 4;
 
   enum class PulseKind : uint8_t {
     NONE = 0,
@@ -111,6 +112,7 @@ class ChangHongIceMakerESPHome : public Component {
   bool start_pulse_(PulseKind kind, uint8_t pin_index, uint32_t duration_ms);
   void finish_pulse_();
   void service_pending_mode_();
+  void service_uv_queue_();
   void sample_once_();
   void advance_bin_if_needed_();
   void reset_bin_(uint8_t index);
@@ -123,6 +125,7 @@ class ChangHongIceMakerESPHome : public Component {
   bool signature_is_mhmhh_(const char *signature) const;
   bool optimistic_active_() const;
   bool cooldown_active_() const;
+  bool command_active_() const;
   bool set_pending_mode_target_(PendingMode target);
   void record_event_(const std::string &event);
   static const char *state_to_cstr_(PanelState state);
@@ -157,6 +160,7 @@ class ChangHongIceMakerESPHome : public Component {
   uint32_t pulse_duration_ms_{0};
   uint32_t pulse_ends_ms_{0};
   uint32_t cooldown_until_ms_{0};
+  uint8_t uv_toggle_queue_{0};
 
   OptimisticKind optimistic_kind_{OptimisticKind::NONE};
   PanelState optimistic_state_{PanelState::UNKNOWN};
