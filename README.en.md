@@ -1,0 +1,358 @@
+# ChangHongIceMakerESPHome
+
+<p align="center">
+  <img src="docs/images/logo.png" alt="ChangHongIceMakerESPHome logo" width="220">
+</p>
+
+Language: [中文](README.md) | English
+
+This is an ESPHome firmware project for integrating a Chang Hong ice maker into Home Assistant. It uses an ESP32-C3 connected to the original five-wire control panel, enabling remote status detection, power control, small/large ice mode switching, and UV button triggering.
+
+This project uses a direct-GPIO wiring method that has been tested on the target machine. It is useful for this specific retrofit and debugging setup, but it is not a universal safe electrical interface. For long-term production-style use, add current limiting, voltage clamps, or an isolated front end for every signal line.
+
+## Author And Project
+
+- Author/Maintainer: [Ljzd-PRO](https://github.com/Ljzd-PRO) `<me@ljzd.link>`
+- ESPHome project id: `ljzd-pro.chang_hong_ice_maker_esphome`
+
+ESPHome's `project.name` field follows the `author_name.project_name` convention and is exposed through logger output, mDNS, and Native API device info. Full author contact information is kept in this README, ESPHome YAML comments, and the local external component source comments.
+
+## Panel And PCB Photos
+
+![Ice-maker external control panel](docs/images/ice-maker-panel.jpeg)
+
+![Panel PCB front side with LEDs, power/select buttons, and the 5-wire connector](docs/images/panel-pcb-front.jpeg)
+
+![Panel PCB back side showing LED, button, and resistor branch traces](docs/images/panel-pcb-back.jpeg)
+
+## Features
+
+- Provides a three-option Home Assistant mode selector:
+  - `Off`
+  - `Small Ice`
+  - `Large Ice`
+- Provides a `UV Toggle` button that simulates a long press of the original Select button.
+- Automatically classifies panel state:
+  - `standby`
+  - `running_small`
+  - `running_large`
+  - `starting`
+  - `stopping`
+  - `unknown`
+- Exposes debug entities such as ADC signature, confidence, action state, and raw P1-P5 values.
+- Exposes firmware and ESPHome build version diagnostic entities for OTA verification.
+- Supports ESPHome Native API, OTA, serial logs, Fallback AP provisioning, and BLE Improv provisioning.
+
+## How It Works
+
+The original ice-maker panel is a five-wire scanning circuit with LEDs and buttons. The ESP32-C3 normally keeps P1-P5 as high-impedance inputs and reads ADC signatures to infer whether the machine is in standby, small-ice mode, or large-ice mode.
+
+For remote control, the firmware briefly switches one GPIO to open-drain low, simulating the original panel button:
+
+```text
+Power short press:  GPIO1 low for about 100 ms
+Select short press: GPIO2 low for about 80 ms
+UV long press:      GPIO2 low for about 5000 ms
+```
+
+After each action, all GPIOs are restored to input mode. The firmware also has a busy state and cooldown handling to avoid repeated Home Assistant clicks interfering with the original panel scan logic.
+
+## Hardware
+
+Recommended hardware:
+
+- ESP32-C3 Super Mini or a compatible ESP32-C3 development board
+- USB-C cable or stable 5V USB power supply
+- Thin wires
+- Multimeter
+- Insulation tape, heat-shrink tubing, or other insulation/fixation material
+
+Before wiring, make sure the ice maker is unplugged and wait at least 30 seconds.
+
+## Wiring
+
+Connect the panel signal lines as follows:
+
+```text
+P1 -> GPIO0
+P2 -> GPIO1
+P3 -> GPIO2
+P4 -> GPIO3
+P5 -> GPIO4
+```
+
+Notes:
+
+- Do not connect the ice-maker GND to ESP32-C3 GND.
+- Power the ESP32-C3 from its own USB port, not from the panel.
+- Do not plug or unplug P1-P5 while the ice maker is powered.
+- Keep bare wires, solder joints, and the ESP32-C3 back side away from metal parts.
+- If P3/GPIO2 prevents the ESP32-C3 from booting, move P3 to GPIO5 and update the firmware pin mapping accordingly.
+
+The current firmware uses direct GPIO wiring. The panel lines may exceed 3.3V, so the ESP32-C3 can be damaged. A safer long-term design should add series resistors and clamp protection on every P line, or use isolation/analog-switch circuitry.
+
+## Flashing
+
+Flash the ESP32-C3 before connecting it to the ice maker.
+
+Install ESPHome:
+
+```sh
+python3 -m venv .venv-esphome
+.venv-esphome/bin/pip install esphome
+```
+
+Copy and edit the secrets file:
+
+```sh
+cp chang_hong_ice_maker_esphome/secrets.example.yaml chang_hong_ice_maker_esphome/secrets.yaml
+```
+
+Example `secrets.yaml`:
+
+```yaml
+wifi_ssid: "YOUR_WIFI_SSID"
+wifi_password: "YOUR_WIFI_PASSWORD"
+fallback_ap_password: "CHANGE_ME_1234"
+api_encryption_key: "REPLACE_WITH_BASE64_32_BYTE_KEY"
+ota_password: "REPLACE_WITH_RANDOM_OTA_PASSWORD"
+```
+
+Generate an API encryption key:
+
+```sh
+openssl rand -base64 32
+```
+
+Validate and compile:
+
+```sh
+.venv-esphome/bin/esphome config chang_hong_ice_maker_esphome/chang-hong-ice-maker-esphome.yaml
+.venv-esphome/bin/esphome compile chang_hong_ice_maker_esphome/chang-hong-ice-maker-esphome.yaml
+```
+
+Find the serial port:
+
+```sh
+ls -1 /dev/cu.usb* /dev/tty.usb*
+```
+
+Initial flashing:
+
+```sh
+.venv-esphome/bin/esphome run chang_hong_ice_maker_esphome/chang-hong-ice-maker-esphome.yaml --device /dev/cu.usbmodemXXXX
+```
+
+Future OTA updates:
+
+```sh
+.venv-esphome/bin/esphome upload chang_hong_ice_maker_esphome/chang-hong-ice-maker-esphome.yaml --device chang-hong-ice-maker-esphome.local
+```
+
+If mDNS is unstable, replace `--device` with the ESP32-C3 IP address.
+
+## Wi-Fi Provisioning
+
+The firmware supports three provisioning methods.
+
+First: enter Wi-Fi SSID and password in `secrets.yaml` before flashing. The device will connect directly after boot.
+
+Second: Fallback AP provisioning.
+
+1. Power on the ESP32-C3.
+2. If it cannot connect to an existing Wi-Fi network, wait about 90 seconds.
+3. Connect your phone or computer to `ChangHongIceMakerESPHome AP`.
+4. Open `http://192.168.4.1/`.
+5. Enter the home Wi-Fi SSID and password.
+
+Third: BLE Improv provisioning.
+
+1. Power on the ESP32-C3.
+2. If it cannot connect to an existing Wi-Fi network, wait about 90 seconds.
+3. Open `https://www.improv-wifi.com/` in Chrome or Edge with Web Bluetooth support.
+4. Select the Bluetooth device named `chang-hong-ice-maker-esphome`.
+5. Enter the home Wi-Fi SSID and password.
+
+Bluetooth is used only for provisioning. Daily control uses ESPHome Native API over Wi-Fi.
+
+The firmware stores successful Wi-Fi credentials in a fixed preference location to avoid losing provisioning data after OTA updates. `secrets.yaml` is local and ignored by Git; do not commit real passwords.
+
+## Add To Home Assistant
+
+1. Make sure the ESP32-C3 and Home Assistant are on the same LAN.
+2. In Home Assistant, open `Settings -> Devices & services`.
+3. If `Chang Hong Ice Maker ESPHome` is discovered automatically, add it.
+4. Otherwise, click `Add Integration` and choose `ESPHome`.
+5. Enter Host as:
+   - `chang-hong-ice-maker-esphome.local`, or
+   - the ESP32-C3 IP address.
+6. Enter the `api_encryption_key` from `secrets.yaml` when prompted.
+
+After successful setup, the Home Assistant device name is:
+
+```text
+Chang Hong Ice Maker ESPHome
+```
+
+Common entities:
+
+```text
+select.chang_hong_ice_maker_esphome_mode
+button.chang_hong_ice_maker_esphome_uv_toggle
+sensor.chang_hong_ice_maker_esphome_state
+binary_sensor.chang_hong_ice_maker_esphome_action_busy
+sensor.chang_hong_ice_maker_esphome_action_state
+sensor.chang_hong_ice_maker_esphome_action_result
+sensor.chang_hong_ice_maker_esphome_firmware_version
+sensor.chang_hong_ice_maker_esphome_esphome_version
+```
+
+### Diagnostic Entities
+
+These entities appear in the `Diagnostics` section of the Home Assistant device page. They are mainly for wiring checks, state-classification debugging, and remote-button troubleshooting. For normal use, you usually only need `Mode`, `UV Toggle`, and `State`.
+
+| Entity | Meaning |
+| --- | --- |
+| `Action Busy` | Whether the firmware is currently simulating a button press or waiting for action confirmation. |
+| `Action State` | Current action state. Common values include `idle`, `pulse_sw1`, `pulse_sw2`, `pulse_uv`, `pending_start_small`, `pending_start_large`, `confirming_*`, `refused_*`, and `timeout_*`. |
+| `Action Result` | Latest action result or event. It is usually `boot` after startup; successful confirmation appears as `confirmed_*`; refused or timed-out actions appear as `refused_*` or `timeout_*`. |
+| `ADC Signature` | Relative ADC signature of the five panel nodes, such as `0HHHH` or `MHMHH`. The symbols `0/H/M/x` mean low/high/mid/other buckets, not real voltages. |
+| `Classified State` | Internal state inferred only from ADC signatures and blink behavior: `standby`, `running_small`, `running_large`, or `unknown`. |
+| `Confidence` | Confidence of the current internal classification, in percent. Higher values mean recent samples better match a known state. |
+| `ESPHome Version` | ESPHome build version running on the device, useful after OTA updates. |
+| `Firmware Version` | Project firmware version from `project_version` in YAML. |
+| `P1 Raw` - `P5 Raw` | Raw ADC readings for P1-P5, roughly `0-4095`. With direct floating GPIO wiring, these are only relative readings and must not be converted to real voltages. |
+| `Ratio 0HHHH` | Percentage of the recent rolling sample window matching the `0HHHH` signature, mainly associated with large-ice running. |
+| `Ratio MHMHH` | Percentage of the recent rolling sample window matching the `MHMHH` signature, used to distinguish standby/small-ice together with power-LED blinking. |
+| `Standby Blink Score` | Score for the slow power-LED blink pattern. Higher values indicate a stronger standby signature. |
+
+If `Classified State` stays `unknown` and `Confidence`, `Ratio 0HHHH`, `Ratio MHMHH`, and `Standby Blink Score` all remain low, check P1-P5 wiring, GPIO mapping, and the actual ice-maker state.
+
+If the same ESP32-C3 was added with older firmware, Home Assistant may keep old `entity_id` values. You can rename the entities manually or remove and re-add the ESPHome device.
+
+<details>
+<summary>View Home Assistant device page screenshot</summary>
+
+![Chang Hong Ice Maker ESPHome device page in Home Assistant](docs/images/home-assistant-device-page.png)
+
+</details>
+
+## Usage
+
+### Start Ice Making
+
+In Home Assistant, set `Mode` to:
+
+```text
+Small Ice
+```
+
+or:
+
+```text
+Large Ice
+```
+
+If the ice maker is currently in standby, the firmware first simulates a Power short press, then sends a Select short press if the target size requires it.
+
+### Switch Ice Size
+
+When the ice maker is running, switch `Mode` between `Small Ice` and `Large Ice`.
+
+### Stop / Standby
+
+Set `Mode` to:
+
+```text
+Off
+```
+
+The firmware simulates a Power short press and returns the ice maker to standby.
+
+### UV Sterilization
+
+Click:
+
+```text
+UV Toggle
+```
+
+The firmware simulates a long Select press for about 5 seconds. The original panel does not provide reliable UV state feedback, so this is a button, not a switch. Confirm the real UV state from the ice maker itself.
+
+## Post-Install Check
+
+After connecting the device to the ice maker for the first time:
+
+1. Unplug the ice maker and connect P1-P5.
+2. Power the ESP32-C3 and wait for Wi-Fi connection.
+3. Power the ice maker to standby.
+4. Wait 20-35 seconds and confirm `State` becomes `standby`.
+5. Select `Large Ice` or `Small Ice` in Home Assistant and confirm the ice maker starts.
+6. Switch ice size and confirm the panel LEDs and Home Assistant state agree.
+7. Select `Off` and confirm the ice maker returns to standby.
+8. Click `UV Toggle` and confirm the long press triggers the UV function.
+
+If the state remains `unknown`, first check whether P1-P5 are swapped, whether P3/GPIO2 affects boot, whether the ice maker is in an abnormal state, and whether the ESP32-C3 is still connected to Wi-Fi.
+
+## Serial Debugging
+
+Serial log settings:
+
+```text
+921600 baud
+DEBUG level
+```
+
+View logs through USB:
+
+```sh
+.venv-esphome/bin/esphome logs chang_hong_ice_maker_esphome/chang-hong-ice-maker-esphome.yaml --device /dev/cu.usbmodemXXXX
+```
+
+Or over the network:
+
+```sh
+.venv-esphome/bin/esphome logs chang_hong_ice_maker_esphome/chang-hong-ice-maker-esphome.yaml --device chang-hong-ice-maker-esphome.local
+```
+
+Common debug fields:
+
+```text
+state                 exposed state
+classifier            internal classified state
+sig                   current ADC signature
+ratio_0HHHH           large-ice signature ratio
+ratio_MHMHH           standby/small-ice signature ratio
+blink                 standby blink score
+action_state          current action state
+action_result         latest action result
+```
+
+## Limitations
+
+- The current direct-GPIO design has electrical risk; ESP32-C3 GPIOs may see panel voltages above 3.3V.
+- This project does not provide reliable Home Assistant entities for no-water or ice-full status.
+- UV has no panel feedback, so it is exposed as a button rather than a real state switch.
+- Distinguishing standby from small-ice running depends on the slow power-LED blink feature; the state may show `unknown` for a few seconds after boot or mode changes.
+- If Home Assistant sends conflicting commands too quickly, the firmware refuses some actions to protect the original panel scanning logic.
+
+## Appendix: Panel Schematics And PCB Trace
+
+<details>
+<summary>View reverse-engineering diagrams</summary>
+
+These diagrams are mainly for maintenance, secondary development, and wiring verification. Most Home Assistant users only need the wiring and usage sections above.
+
+The first diagram expands the confirmed netlist branch by branch:
+
+![Ice-maker panel equivalent schematic: expanded netlist](docs/images/panel-schematic-expanded.png)
+
+The second diagram keeps a single shared P1-P5 node set and shows how the five wires are reused for LED driving and button scanning:
+
+![Ice-maker five-wire panel interconnected equivalent schematic](docs/images/panel-schematic-interconnected.png)
+
+The third diagram is an approximate back-side copper trace reconstruction with front-side components mirrored onto the back-side view. It is not a production-ready Gerber file:
+
+![Ice-maker control panel PCB trace diagram](docs/images/panel-pcb-trace.png)
+
+</details>
