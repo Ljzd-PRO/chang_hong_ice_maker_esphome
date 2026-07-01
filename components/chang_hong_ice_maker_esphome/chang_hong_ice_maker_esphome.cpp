@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Ljzd-PRO <me@ljzd.link>
+// Project: https://github.com/Ljzd-PRO
+
 #include "chang_hong_ice_maker_esphome.h"
 
 #include "esphome/core/log.h"

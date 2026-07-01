@@ -1,3 +1,7 @@
+# ChangHongIceMakerESPHome
+# Copyright (c) 2026 Ljzd-PRO <me@ljzd.link>
+# Project: https://github.com/Ljzd-PRO
+
 substitutions:
   name: chang-hong-ice-maker-esphome
   friendly_name: Chang Hong Ice Maker ESPHome
@@ -6,7 +10,9 @@ substitutions:
 esphome:
   name: ${name}
   friendly_name: ${friendly_name}
-  comment: ESP32-C3 direct GPIO bridge for the five-wire ice-maker panel
+  comment: >-
+    ESP32-C3 direct GPIO bridge for the five-wire ice-maker panel.
+    Author: Ljzd-PRO <me@ljzd.link> https://github.com/Ljzd-PRO
   project:
     name: "ljzd-pro.chang_hong_ice_maker_esphome"
     version: ${project_version}

@@ -8,6 +8,13 @@
 
 本项目使用已经实测可行的直连 GPIO 方案。它适合当前这台机器的改造和调试，但不是通用安全接口方案；正式长期使用时，建议给每根信号线增加限流、电平钳位或隔离前端。
 
+## 作者与项目信息
+
+- 作者/维护者：[Ljzd-PRO](https://github.com/Ljzd-PRO) `<me@ljzd.link>`
+- ESPHome 项目标识：`ljzd-pro.chang_hong_ice_maker_esphome`
+
+ESPHome 的 `project.name` 字段使用 `author_name.project_name` 形式，并会通过 logger、mDNS 和 Native API 的 device_info 暴露。完整作者联系方式保存在本 README、ESPHome YAML 注释和本地 external component 源码注释中。
+
 ## 面板与电路板照片
 
 ![制冰机外部控制面板](docs/images/ice-maker-panel.jpeg)

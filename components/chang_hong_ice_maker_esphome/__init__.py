@@ -1,8 +1,11 @@
+# Copyright (c) 2026 Ljzd-PRO <me@ljzd.link>
+# Project: https://github.com/Ljzd-PRO
+
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.const import CONF_ID
 
-CODEOWNERS = ["@local"]
+CODEOWNERS = ["@Ljzd-PRO"]
 DEPENDENCIES = ["wifi"]
 
 chang_hong_ice_maker_esphome_ns = cg.esphome_ns.namespace("chang_hong_ice_maker_esphome")

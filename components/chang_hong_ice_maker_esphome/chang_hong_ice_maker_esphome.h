@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Ljzd-PRO <me@ljzd.link>
+// Project: https://github.com/Ljzd-PRO
+
 #pragma once
 
 #include "esphome/components/wifi/wifi_component.h"
