@@ -202,6 +202,13 @@ sensor.chang_hong_ice_maker_esphome_esphome_version
 
 如果曾经用旧固件添加过同一块 ESP32-C3，Home Assistant 可能会保留旧 entity_id。此时可以在 HA 的实体设置中手动改名，或删除旧 ESPHome 设备后重新添加。
 
+<details>
+<summary>展开查看 Home Assistant 设备页面截图</summary>
+
+![Home Assistant 中的 Chang Hong Ice Maker ESPHome 设备页面](docs/images/home-assistant-device-page.png)
+
+</details>
+
 ## 使用方式
 
 ### 开机运行
