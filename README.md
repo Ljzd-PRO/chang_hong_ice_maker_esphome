@@ -1,5 +1,9 @@
 # ChangHongIceMakerESPHome
 
+<p align="center">
+  <img src="docs/images/logo.png" alt="ChangHongIceMakerESPHome logo" width="220">
+</p>
+
 这是一个用于把长虹制冰机接入 Home Assistant 的 ESPHome 固件项目。硬件基于 ESP32-C3，接入制冰机原控制面板的 5 根信号线，实现远程查看工作状态、切换开关机/大小冰、触发 UV 杀菌按键。
 
 本项目使用已经实测可行的直连 GPIO 方案。它适合当前这台机器的改造和调试，但不是通用安全接口方案；正式长期使用时，建议给每根信号线增加限流、电平钳位或隔离前端。
