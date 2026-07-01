@@ -66,7 +66,7 @@ After each action, all GPIOs are restored to input mode. The firmware also has a
 Recommended hardware:
 
 - ESP32-C3 Super Mini or a compatible ESP32-C3 development board
-- USB-C cable or stable 5V USB power supply
+- Non-earthed two-prong USB-C power adapter or power bank
 - Thin wires
 - Multimeter
 - Insulation tape, heat-shrink tubing, or other insulation/fixation material
@@ -92,6 +92,16 @@ Notes:
 - Do not plug or unplug P1-P5 while the ice maker is powered.
 - Keep bare wires, solder joints, and the ESP32-C3 back side away from metal parts.
 - If P3/GPIO2 prevents the ESP32-C3 from booting, move P3 to GPIO5 and update the firmware pin mapping accordingly.
+
+Powering matters. This direct-GPIO setup relies on the ESP32-C3 being powered from a floating supply. In testing, a power bank and a normal two-prong USB-C adapter both worked: state detection was stable and the original panel buttons still worked. A Windows PC USB connection did not work; the PC ground reference coupled through USB/GPIO/ADC paths and disturbed the panel scan, causing abnormal state detection and making the original panel buttons unresponsive.
+
+For normal installation:
+
+- Power the ESP32-C3 from a two-prong USB-C adapter or a power bank.
+- Do not connect the ESP32-C3 to a computer USB port while P1-P5 are connected to the ice maker.
+- Do not connect ESP32-C3 GND to the chassis, protective earth, or metal base of the ice maker.
+- Do not power the ESP32-C3 from P1-P5; they are multiplexed panel scan lines, not stable supply rails.
+- If USB serial debugging is required while P1-P5 are connected, use a USB isolator. Prefer Wi-Fi logs and OTA for normal debugging.
 
 The current firmware uses direct GPIO wiring. The panel lines may exceed 3.3V, so the ESP32-C3 can be damaged. A safer long-term design should add series resistors and clamp protection on every P line, or use isolation/analog-switch circuitry.
 
@@ -306,6 +316,10 @@ Serial log settings:
 921600 baud
 DEBUG level
 ```
+
+Use USB logs only when P1-P5 are disconnected from the ice maker, or when the
+USB connection is isolated. When P1-P5 are connected, prefer Wi-Fi logs to avoid
+the computer USB ground reference disturbing the panel scan.
 
 View logs through USB:
 
