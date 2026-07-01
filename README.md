@@ -300,3 +300,24 @@ action_result         最近动作结果
 - UV 没有面板反馈，因此只提供按钮，不提供真实状态开关。
 - 待机和小冰运行的区分依赖电源灯慢闪特征，刚上电或刚切换后的几秒内可能显示 `unknown`。
 - 如果 Home Assistant 快速连续发送冲突命令，固件会拒绝部分命令，以保护原面板扫描逻辑。
+
+## 附录：面板电路图与 PCB 走线图
+
+<details>
+<summary>展开查看逆向分析用电路图</summary>
+
+这些图主要服务于维修、二次开发和验证接线。普通 Home Assistant 用户通常只需要阅读前面的接线与使用说明。
+
+第一张是“网表展开图”，把每条已确认支路单独展开，便于核对 `P1-P5` 与 LED、按键、电阻的连接：
+
+![制冰机控制面板等效原理图：网表展开图](docs/images/panel-schematic-expanded.png)
+
+第二张是“单张互连等效原理图”，只保留一套 `P1-P5` 公共节点，便于理解 5 根线如何复用为 LED 驱动和按键扫描：
+
+![制冰机五线控制面板互连等效原理图](docs/images/panel-schematic-interconnected.png)
+
+第三张是“PCB 走线示意图”，按背面铜箔视角近似复原，正面元件以镜像投影方式标注。它不是可直接投产的 Gerber 文件：
+
+![制冰机控制面板 PCB 走线图](docs/images/panel-pcb-trace.png)
+
+</details>
