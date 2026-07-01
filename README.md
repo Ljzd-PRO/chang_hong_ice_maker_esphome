@@ -205,7 +205,26 @@ sensor.chang_hong_ice_maker_esphome_firmware_version
 sensor.chang_hong_ice_maker_esphome_esphome_version
 ```
 
-诊断实体包括 ADC 签名、置信度、待机闪烁分数、P1-P5 原始 ADC 值等。
+### 诊断实体说明
+
+这些实体会出现在 Home Assistant 设备页面的 `诊断` 分组里，主要用于确认接线、判断识别是否稳定，以及排查远程按键动作。日常使用通常只需要 `Mode`、`UV Toggle` 和 `State`。
+
+| 实体名 | 含义 |
+| --- | --- |
+| `Action Busy` | 当前是否正在执行模拟按键或等待动作确认；显示“开/关”或 `on/off`。 |
+| `Action State` | 当前动作状态。常见值包括 `idle`、`pulse_sw1`、`pulse_sw2`、`pulse_uv`、`pending_start_small`、`pending_start_large`、`confirming_*`、`refused_*`、`timeout_*`。 |
+| `Action Result` | 最近一次动作结果或事件。刚启动时通常是 `boot`；成功确认时会出现 `confirmed_*`；被拒绝或超时时会出现 `refused_*`、`timeout_*`。 |
+| `ADC Signature` | 当前 5 个面板节点的相对 ADC 签名，例如 `0HHHH`、`MHMHH`。这里的 `0/H/M/x` 是低/高/中间/其它区间，不是实际电压。 |
+| `Classified State` | 仅由 ADC 签名和闪烁特征推导出的内部状态，可能是 `standby`、`running_small`、`running_large` 或 `unknown`。 |
+| `Confidence` | 当前内部识别结果的置信度，单位为百分比。数值越高，说明最近一段采样越像某个已知状态。 |
+| `ESPHome Version` | 当前设备运行时使用的 ESPHome 编译版本，用于 OTA 后核对固件环境。 |
+| `Firmware Version` | 本项目固件版本，来自 YAML 里的 `project_version`。 |
+| `P1 Raw` - `P5 Raw` | `P1-P5` 的原始 ADC 读数，范围大致为 `0-4095`。直连 GPIO 且未共地时只能用于相对判断，不应换算成真实电压。 |
+| `Ratio 0HHHH` | 最近滚动采样窗口内，出现 `0HHHH` 签名的比例；该签名主要对应大冰运行。 |
+| `Ratio MHMHH` | 最近滚动采样窗口内，出现 `MHMHH` 签名的比例；该签名用于区分待机/小冰，再结合电源灯慢闪判断。 |
+| `Standby Blink Score` | 电源灯慢闪特征评分；越高越像待机状态。 |
+
+如果 `Classified State` 长期是 `unknown`，同时 `Confidence`、`Ratio 0HHHH`、`Ratio MHMHH` 和 `Standby Blink Score` 都很低，通常说明 `P1-P5` 接线、GPIO 映射或制冰机当前状态需要重新检查。
 
 如果曾经用旧固件添加过同一块 ESP32-C3，Home Assistant 可能会保留旧 entity_id。此时可以在 HA 的实体设置中手动改名，或删除旧 ESPHome 设备后重新添加。
 
