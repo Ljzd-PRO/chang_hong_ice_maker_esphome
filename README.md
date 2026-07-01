@@ -4,6 +4,14 @@
 
 本项目使用已经实测可行的直连 GPIO 方案。它适合当前这台机器的改造和调试，但不是通用安全接口方案；正式长期使用时，建议给每根信号线增加限流、电平钳位或隔离前端。
 
+## 面板与电路板照片
+
+![制冰机外部控制面板](docs/images/ice-maker-panel.jpeg)
+
+![面板电路板正面，包含 LED、开关键、选择键和 5 线接口](docs/images/panel-pcb-front.jpeg)
+
+![面板电路板背面，可见 LED、按键和电阻支路走线](docs/images/panel-pcb-back.jpeg)
+
 ## 功能
 
 - 在 Home Assistant 中提供一个三档模式选择：
