@@ -1,11 +1,15 @@
 substitutions:
   name: chang-hong-ice-maker-esphome
   friendly_name: Chang Hong Ice Maker ESPHome
+  project_version: "0.1.0"
 
 esphome:
   name: ${name}
   friendly_name: ${friendly_name}
   comment: ESP32-C3 direct GPIO bridge for the five-wire ice-maker panel
+  project:
+    name: "ljzd.chang_hong_ice_maker_esphome"
+    version: ${project_version}
   platformio_options:
     build_flags:
       - -DARDUINO_USB_MODE=1
@@ -120,6 +124,23 @@ binary_sensor:
       return id(chang_hong_ice_maker_esphome_core).action_busy();
 
 text_sensor:
+  - platform: template
+    id: chang_hong_ice_maker_esphome_firmware_version
+    name: Firmware Version
+    icon: mdi:tag-outline
+    entity_category: diagnostic
+    update_interval: 60s
+    lambda: |-
+      return {"${project_version}"};
+
+  - platform: version
+    id: chang_hong_ice_maker_esphome_esphome_version
+    name: ESPHome Version
+    icon: mdi:chip
+    entity_category: diagnostic
+    hide_timestamp: true
+    hide_hash: true
+
   - platform: template
     id: chang_hong_ice_maker_esphome_state
     name: State

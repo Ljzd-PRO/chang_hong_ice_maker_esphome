@@ -31,6 +31,7 @@
   - `stopping`
   - `unknown`
 - 提供调试实体：ADC 签名、置信度、动作状态、P1-P5 原始读数等。
+- 提供固件版本和 ESPHome 编译版本诊断实体，方便 OTA 后确认设备运行的固件。
 - 支持 ESPHome Native API、OTA、串口日志、Fallback AP 配网和 BLE Improv 配网。
 
 ## 工作方式简述
@@ -193,6 +194,8 @@ sensor.chang_hong_ice_maker_esphome_state
 binary_sensor.chang_hong_ice_maker_esphome_action_busy
 sensor.chang_hong_ice_maker_esphome_action_state
 sensor.chang_hong_ice_maker_esphome_action_result
+sensor.chang_hong_ice_maker_esphome_firmware_version
+sensor.chang_hong_ice_maker_esphome_esphome_version
 ```
 
 诊断实体包括 ADC 签名、置信度、待机闪烁分数、P1-P5 原始 ADC 值等。
