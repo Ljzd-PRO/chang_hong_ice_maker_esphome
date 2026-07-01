@@ -10,6 +10,10 @@
 
 本项目使用已经实测可行的直连 GPIO 方案。它适合当前这台机器的改造和调试，但不是通用安全接口方案；正式长期使用时，建议给每根信号线增加限流、电平钳位或隔离前端。
 
+## 相关仓库
+
+本仓库专注于 ESPHome / Home Assistant 固件实现。五线面板的电气技术细节、逆向采集过程、固定网表、原理图和 PCB 走线图参考：[ice_panel_sniffer](https://github.com/Ljzd-PRO/ice_panel_sniffer)。
+
 ## 作者与项目信息
 
 - 作者/维护者：[Ljzd-PRO](https://github.com/Ljzd-PRO) `<me@ljzd.link>`

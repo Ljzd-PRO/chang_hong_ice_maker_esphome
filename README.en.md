@@ -10,6 +10,10 @@ This is an ESPHome firmware project for integrating a Chang Hong ice maker into 
 
 This project uses a direct-GPIO wiring method that has been tested on the target machine. It is useful for this specific retrofit and debugging setup, but it is not a universal safe electrical interface. For long-term production-style use, add current limiting, voltage clamps, or an isolated front end for every signal line.
 
+## Related Repository
+
+This repository focuses on the ESPHome / Home Assistant firmware implementation. For electrical details of the five-wire panel, the reverse-engineering capture process, confirmed netlist, schematics, and PCB trace diagrams, see [ice_panel_sniffer](https://github.com/Ljzd-PRO/ice_panel_sniffer).
+
 ## Author And Project
 
 - Author/Maintainer: [Ljzd-PRO](https://github.com/Ljzd-PRO) `<me@ljzd.link>`
