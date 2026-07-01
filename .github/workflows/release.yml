@@ -27,6 +27,7 @@ permissions:
 env:
   ESPHOME_YAML: chang-hong-ice-maker-esphome.yaml
   NODE_NAME: chang-hong-ice-maker-esphome
+  CHANGE_LOG: CHANGE_LOG.md
 
 jobs:
   release:
@@ -109,16 +110,46 @@ jobs:
 
           echo "RELEASE_TAG=${release_tag}" >> "$GITHUB_ENV"
           echo "RELEASE_PRERELEASE=${prerelease}" >> "$GITHUB_ENV"
-          cat > release-notes.md <<EOF
-          Automated ESPHome firmware build for \`${release_tag}\`.
 
-          Artifacts:
-          - \`${NODE_NAME}.factory.bin\`: first USB/serial flash image
-          - \`${NODE_NAME}.ota.bin\`: OTA update image
-          - \`${NODE_NAME}.bin\`: raw firmware image
-          - \`${NODE_NAME}.build_info.json\`: ESPHome build metadata
-          - \`SHA256SUMS\`: artifact checksums
-          EOF
+      - name: Build release notes from changelog
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os
+          import pathlib
+          import re
+          import sys
+
+          tag = os.environ["RELEASE_TAG"]
+          node_name = os.environ["NODE_NAME"]
+          changelog_path = pathlib.Path(os.environ["CHANGE_LOG"])
+
+          if not changelog_path.exists():
+              sys.exit(f"{changelog_path} does not exist")
+
+          changelog = changelog_path.read_text(encoding="utf-8")
+          heading = re.compile(rf"^##\s+\[?{re.escape(tag)}\]?(?:\s+-\s+.+)?\s*$", re.MULTILINE)
+          match = heading.search(changelog)
+          if not match:
+              sys.exit(f"{changelog_path} has no section for {tag}")
+
+          next_heading = re.search(r"^##\s+", changelog[match.end():], re.MULTILINE)
+          end = match.end() + next_heading.start() if next_heading else len(changelog)
+          release_notes = changelog[match.start():end].strip()
+
+          release_notes += f"""
+
+          ## Firmware Artifacts
+
+          - `{node_name}.factory.bin`: first USB/serial flash image
+          - `{node_name}.ota.bin`: OTA update image
+          - `{node_name}.bin`: raw firmware image
+          - `{node_name}.build_info.json`: ESPHome build metadata
+          - `SHA256SUMS`: artifact checksums
+          """
+
+          pathlib.Path("release-notes.md").write_text(release_notes + "\n", encoding="utf-8")
+          PY
 
       - name: Create or update GitHub release
         env:
@@ -126,6 +157,7 @@ jobs:
         run: |
           set -euo pipefail
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release edit "$RELEASE_TAG" --notes-file release-notes.md
             gh release upload "$RELEASE_TAG" dist/* --clobber
           else
             args=("$RELEASE_TAG" dist/* --title "$RELEASE_TAG" --notes-file release-notes.md)
@@ -134,4 +166,3 @@ jobs:
             fi
             gh release create "${args[@]}"
           fi
-
