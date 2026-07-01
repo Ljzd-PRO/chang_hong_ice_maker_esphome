@@ -32,5 +32,6 @@ Initial public firmware release for the ChangHongIceMakerESPHome project.
 ### Release Artifact Notes
 
 - GitHub release firmware artifacts are built with CI placeholder Wi-Fi, OTA, and API encryption secrets.
+- The CI `api_encryption_key` baked into GitHub release firmware artifacts is fixed and shared across those artifacts; it is not randomly generated per user, per device, or per flash.
 - For real installations, generate a private `api_encryption_key` and `ota_password` in local `secrets.yaml`, then build and flash your own firmware.
 - Do not publish screenshots or logs containing your real ESPHome API encryption key.
