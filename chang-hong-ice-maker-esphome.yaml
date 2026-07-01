@@ -8,7 +8,7 @@ esphome:
   friendly_name: ${friendly_name}
   comment: ESP32-C3 direct GPIO bridge for the five-wire ice-maker panel
   project:
-    name: "ljzd.chang_hong_ice_maker_esphome"
+    name: "ljzd-pro.chang_hong_ice_maker_esphome"
     version: ${project_version}
   platformio_options:
     build_flags:
