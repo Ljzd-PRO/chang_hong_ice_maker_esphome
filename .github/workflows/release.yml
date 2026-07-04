@@ -138,13 +138,13 @@ jobs:
 
           release_notes += f"""
 
-          ## Firmware Artifacts
+          ## 固件产物
 
-          - `{node_name}.factory.bin`: first USB/serial flash image
-          - `{node_name}.ota.bin`: OTA update image
-          - `{node_name}.bin`: raw firmware image
-          - `{node_name}.build_info.json`: ESPHome build metadata
-          - `SHA256SUMS`: artifact checksums
+          - `{node_name}.factory.bin`：首次 USB/串口刷机镜像
+          - `{node_name}.ota.bin`：OTA 更新镜像
+          - `{node_name}.bin`：原始固件镜像
+          - `{node_name}.build_info.json`：ESPHome 构建元数据
+          - `SHA256SUMS`：固件产物校验和
           """
 
           pathlib.Path("release-notes.md").write_text(release_notes + "\n", encoding="utf-8")
