@@ -309,6 +309,10 @@ action_result         最近动作结果
 
 </details>
 
+## 开发与贡献
+
+想参与代码、算法或文档改进，请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。
+
 ## 许可证
 
 BSD 3-Clause，见 [LICENSE.txt](LICENSE.txt)。

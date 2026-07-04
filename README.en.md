@@ -309,6 +309,10 @@ The panel netlist, capture tools, and reverse-engineering notes are in [ice_pane
 
 </details>
 
+## Contributing
+
+For code, classifier, or documentation contributions, see [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## License
 
 BSD 3-Clause. See [LICENSE.txt](LICENSE.txt).
