@@ -1,5 +1,24 @@
 # Change Log
 
+## v0.2.0 - 2026-07-04
+
+### Changed
+
+- Replaced the previous three-option Home Assistant `Mode` select with two template switches:
+  - `Power`
+  - `Large Ice`
+- Changed standby startup behavior to match the physical machine: every startup from standby is treated as Large Ice first.
+- `Large Ice` now defaults to `ON` while the machine is standby/off; Small Ice commands are refused while not running.
+- Reworked panel state classification from one 32-second window to two windows:
+  - 2-second fast window for large/small running candidates.
+  - 16-second standby window for power-LED blink confirmation.
+- Added diagnostics for fast state candidate, fast signature ratios, and standby window validity.
+
+### Notes
+
+- This release intentionally changes Home Assistant entity IDs. Remove or ignore the old `select.chang_hong_ice_maker_esphome_mode` entity after upgrading.
+- Standby confirmation is still slower than running-state detection because it depends on the slow blinking power LED.
+
 ## v0.1.0 - 2026-07-01
 
 Initial public firmware release for the ChangHongIceMakerESPHome project.

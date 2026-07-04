@@ -31,10 +31,9 @@ ESPHome's `project.name` field follows the `author_name.project_name` convention
 
 ## Features
 
-- Provides a three-option Home Assistant mode selector:
-  - `Off`
-  - `Small Ice`
-  - `Large Ice`
+- Provides two main Home Assistant control switches:
+  - `Power`: running / standby
+  - `Large Ice`: large / small ice; defaults to large while standby
 - Provides a `UV Toggle` button that simulates a long press of the original Select button.
 - Automatically classifies panel state:
   - `standby`
@@ -43,13 +42,15 @@ ESPHome's `project.name` field follows the `author_name.project_name` convention
   - `starting`
   - `stopping`
   - `unknown`
-- Exposes debug entities such as ADC signature, confidence, action state, and raw P1-P5 values.
+- Exposes debug entities such as fast state candidate, ADC signature, confidence, action state, and raw P1-P5 values.
 - Exposes firmware and ESPHome build version diagnostic entities for OTA verification.
 - Supports ESPHome Native API, OTA, serial logs, Fallback AP provisioning, and BLE Improv provisioning.
 
 ## How It Works
 
 The original ice-maker panel is a five-wire scanning circuit with LEDs and buttons. The ESP32-C3 normally keeps P1-P5 as high-impedance inputs and reads ADC signatures to infer whether the machine is in standby, small-ice mode, or large-ice mode.
+
+State detection uses two windows: a 2-second fast window for large/small running detection, and a 16-second slow window for standby power-LED blink confirmation. This makes ice-size changes faster while avoiding the common false positive where standby briefly looks like small-ice mode.
 
 For remote control, the firmware briefly switches one GPIO to open-drain low, simulating the original panel button:
 
@@ -211,10 +212,12 @@ Chang Hong Ice Maker ESPHome
 Common entities:
 
 ```text
-select.chang_hong_ice_maker_esphome_mode
+switch.chang_hong_ice_maker_esphome_power
+switch.chang_hong_ice_maker_esphome_large_ice
 button.chang_hong_ice_maker_esphome_uv_toggle
 sensor.chang_hong_ice_maker_esphome_state
 binary_sensor.chang_hong_ice_maker_esphome_action_busy
+binary_sensor.chang_hong_ice_maker_esphome_standby_window_valid
 sensor.chang_hong_ice_maker_esphome_action_state
 sensor.chang_hong_ice_maker_esphome_action_result
 sensor.chang_hong_ice_maker_esphome_firmware_version
@@ -223,29 +226,33 @@ sensor.chang_hong_ice_maker_esphome_esphome_version
 
 ### Diagnostic Entities
 
-These entities appear in the `Diagnostics` section of the Home Assistant device page. They are mainly for wiring checks, state-classification debugging, and remote-button troubleshooting. For normal use, you usually only need `Mode`, `UV Toggle`, and `State`.
+These entities appear in the `Diagnostics` section of the Home Assistant device page. They are mainly for wiring checks, state-classification debugging, and remote-button troubleshooting. For normal use, you usually only need `Power`, `Large Ice`, `UV Toggle`, and `State`.
 
 | Entity | Meaning |
 | --- | --- |
 | `Action Busy` | Whether the firmware is currently simulating a button press or waiting for action confirmation. |
-| `Action State` | Current action state. Common values include `idle`, `pulse_sw1`, `pulse_sw2`, `pulse_uv`, `pending_start_small`, `pending_start_large`, `confirming_*`, `refused_*`, and `timeout_*`. |
+| `Action State` | Current action state. Common values include `idle`, `pulse_sw1`, `pulse_sw2`, `pulse_uv`, `queued_uv_*`, `confirming_*`, `refused_*`, and `timeout_*`. |
 | `Action Result` | Latest action result or event. It is usually `boot` after startup; successful confirmation appears as `confirmed_*`; refused or timed-out actions appear as `refused_*` or `timeout_*`. |
 | `ADC Signature` | Relative ADC signature of the five panel nodes, such as `0HHHH` or `MHMHH`. The symbols `0/H/M/x` mean low/high/mid/other buckets, not real voltages. |
 | `Classified State` | Internal state inferred only from ADC signatures and blink behavior: `standby`, `running_small`, `running_large`, or `unknown`. |
 | `Confidence` | Confidence of the current internal classification, in percent. Higher values mean recent samples better match a known state. |
 | `ESPHome Version` | ESPHome build version running on the device, useful after OTA updates. |
+| `Fast State Candidate` | Running-state candidate from the 2-second fast window. `MHMHH` appears in both standby and small-ice mode, so this candidate is not always published as the exposed state immediately. |
+| `Fast Ratio 0HHHH` | Percentage of the recent 2-second window matching `0HHHH`, mainly associated with large-ice running. |
+| `Fast Ratio MHMHH` | Percentage of the recent 2-second window matching `MHMHH`, associated with small-ice candidate and also seen during standby. |
 | `Firmware Version` | Project firmware version from `project_version` in YAML. |
 | `P1 Raw` - `P5 Raw` | Raw ADC readings for P1-P5, roughly `0-4095`. With direct floating GPIO wiring, these are only relative readings and must not be converted to real voltages. |
-| `Ratio 0HHHH` | Percentage of the recent rolling sample window matching the `0HHHH` signature, mainly associated with large-ice running. |
-| `Ratio MHMHH` | Percentage of the recent rolling sample window matching the `MHMHH` signature, used to distinguish standby/small-ice together with power-LED blinking. |
 | `Standby Blink Score` | Score for the slow power-LED blink pattern. Higher values indicate a stronger standby signature. |
+| `Standby Window Valid` | Whether the 16-second slow window currently confirms standby blink behavior. |
 
-If `Classified State` stays `unknown` and `Confidence`, `Ratio 0HHHH`, `Ratio MHMHH`, and `Standby Blink Score` all remain low, check P1-P5 wiring, GPIO mapping, and the actual ice-maker state.
+If `Classified State` stays `unknown` and `Confidence`, `Fast Ratio 0HHHH`, `Fast Ratio MHMHH`, and `Standby Blink Score` all remain low, check P1-P5 wiring, GPIO mapping, and the actual ice-maker state.
 
 If the same ESP32-C3 was added with older firmware, Home Assistant may keep old `entity_id` values. You can rename the entities manually or remove and re-add the ESPHome device.
 
 <details>
-<summary>View Home Assistant device page screenshot</summary>
+<summary>View Home Assistant device page screenshot (older UI example)</summary>
+
+The current firmware uses `Power` and `Large Ice` switches. The screenshot below was captured during earlier development; if it shows a `Mode` field, use the entity list in this README as the source of truth.
 
 ![Chang Hong Ice Maker ESPHome device page in Home Assistant](docs/images/home-assistant-device-page.png)
 
@@ -255,30 +262,30 @@ If the same ESP32-C3 was added with older firmware, Home Assistant may keep old 
 
 ### Start Ice Making
 
-In Home Assistant, set `Mode` to:
+In Home Assistant, turn on:
 
 ```text
-Small Ice
+Power
 ```
 
-or:
+The ice maker always starts from standby into large-ice mode, so `Large Ice` stays on by default.
+
+### Switch Ice Size
+
+When the ice maker is running, toggle:
 
 ```text
 Large Ice
 ```
 
-If the ice maker is currently in standby, the firmware first simulates a Power short press, then sends a Select short press if the target size requires it.
-
-### Switch Ice Size
-
-When the ice maker is running, switch `Mode` between `Small Ice` and `Large Ice`.
+On means large ice; off means small ice. The machine cannot be set to small ice while standby. If `Large Ice` is turned off during standby, the firmware refuses the command and restores it to on.
 
 ### Stop / Standby
 
-Set `Mode` to:
+Turn off:
 
 ```text
-Off
+Power
 ```
 
 The firmware simulates a Power short press and returns the ice maker to standby.
@@ -300,10 +307,10 @@ After connecting the device to the ice maker for the first time:
 1. Unplug the ice maker and connect P1-P5.
 2. Power the ESP32-C3 and wait for Wi-Fi connection.
 3. Power the ice maker to standby.
-4. Wait 20-35 seconds and confirm `State` becomes `standby`.
-5. Select `Large Ice` or `Small Ice` in Home Assistant and confirm the ice maker starts.
-6. Switch ice size and confirm the panel LEDs and Home Assistant state agree.
-7. Select `Off` and confirm the ice maker returns to standby.
+4. Wait about 20 seconds and confirm `State` becomes `standby`, `Power` is off, and `Large Ice` is on.
+5. Turn on `Power` in Home Assistant and confirm the ice maker starts in large-ice mode.
+6. Toggle `Large Ice` while running and confirm the panel LEDs and Home Assistant state agree.
+7. Turn off `Power` and confirm the ice maker returns to standby.
 8. Click `UV Toggle` and confirm the long press triggers the UV function.
 
 If the state remains `unknown`, first check whether P1-P5 are swapped, whether P3/GPIO2 affects boot, whether the ice maker is in an abnormal state, and whether the ESP32-C3 is still connected to Wi-Fi.
@@ -338,9 +345,11 @@ Common debug fields:
 ```text
 state                 exposed state
 classifier            internal classified state
+fast                  2-second fast-window state candidate
 sig                   current ADC signature
-ratio_0HHHH           large-ice signature ratio
-ratio_MHMHH           standby/small-ice signature ratio
+fast_0HHHH            2-second large-ice signature ratio
+fast_MHMHH            2-second small/standby signature ratio
+standby_valid         whether the 16-second standby window is valid
 blink                 standby blink score
 action_state          current action state
 action_result         latest action result
@@ -351,7 +360,7 @@ action_result         latest action result
 - The current direct-GPIO design has electrical risk; ESP32-C3 GPIOs may see panel voltages above 3.3V.
 - This project does not provide reliable Home Assistant entities for no-water or ice-full status.
 - UV has no panel feedback, so it is exposed as a button rather than a real state switch.
-- Distinguishing standby from small-ice running depends on the slow power-LED blink feature; the state may show `unknown` for a few seconds after boot or mode changes.
+- Distinguishing standby from small-ice running depends on the slow power-LED blink feature; running state usually updates within 2-5 seconds, while standby confirmation usually needs about 16-25 seconds.
 - If Home Assistant sends conflicting commands too quickly, the firmware refuses some actions to protect the original panel scanning logic.
 
 ## Appendix: Panel Schematics And PCB Trace

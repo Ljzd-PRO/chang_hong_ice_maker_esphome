@@ -31,10 +31,9 @@ ESPHome 的 `project.name` 字段使用 `author_name.project_name` 形式，并�
 
 ## 功能
 
-- 在 Home Assistant 中提供一个三档模式选择：
-  - `Off`
-  - `Small Ice`
-  - `Large Ice`
+- 在 Home Assistant 中提供两个主控制开关：
+  - `Power`：运行/待机
+  - `Large Ice`：大冰/小冰，待机时默认显示为大冰
 - 提供 `UV Toggle` 按钮，用于模拟长按“选择”键开启或关闭 UV 杀菌。
 - 自动识别面板状态：
   - `standby`
@@ -43,13 +42,15 @@ ESPHome 的 `project.name` 字段使用 `author_name.project_name` 形式，并�
   - `starting`
   - `stopping`
   - `unknown`
-- 提供调试实体：ADC 签名、置信度、动作状态、P1-P5 原始读数等。
+- 提供调试实体：快速状态候选、ADC 签名、置信度、动作状态、P1-P5 原始读数等。
 - 提供固件版本和 ESPHome 编译版本诊断实体，方便 OTA 后确认设备运行的固件。
 - 支持 ESPHome Native API、OTA、串口日志、Fallback AP 配网和 BLE Improv 配网。
 
 ## 工作方式简述
 
 制冰机原面板是 5 根线加若干 LED/按键的扫描电路。ESP32-C3 平时只把 P1-P5 作为高阻输入读取，通过 ADC 签名判断当前是待机、小冰运行还是大冰运行。
+
+状态识别使用两个窗口：2 秒快速窗口用于识别大冰/小冰运行，16 秒慢窗口用于确认待机电源灯慢闪。这样能更快跟随大小冰切换，同时避免把待机短窗口误判为小冰。
 
 远程控制时，固件会短暂把对应 GPIO 切换为开漏低电平，模拟原面板按键：
 
@@ -211,10 +212,12 @@ Chang Hong Ice Maker ESPHome
 常用实体：
 
 ```text
-select.chang_hong_ice_maker_esphome_mode
+switch.chang_hong_ice_maker_esphome_power
+switch.chang_hong_ice_maker_esphome_large_ice
 button.chang_hong_ice_maker_esphome_uv_toggle
 sensor.chang_hong_ice_maker_esphome_state
 binary_sensor.chang_hong_ice_maker_esphome_action_busy
+binary_sensor.chang_hong_ice_maker_esphome_standby_window_valid
 sensor.chang_hong_ice_maker_esphome_action_state
 sensor.chang_hong_ice_maker_esphome_action_result
 sensor.chang_hong_ice_maker_esphome_firmware_version
@@ -223,29 +226,33 @@ sensor.chang_hong_ice_maker_esphome_esphome_version
 
 ### 诊断实体说明
 
-这些实体会出现在 Home Assistant 设备页面的 `诊断` 分组里，主要用于确认接线、判断识别是否稳定，以及排查远程按键动作。日常使用通常只需要 `Mode`、`UV Toggle` 和 `State`。
+这些实体会出现在 Home Assistant 设备页面的 `诊断` 分组里，主要用于确认接线、判断识别是否稳定，以及排查远程按键动作。日常使用通常只需要 `Power`、`Large Ice`、`UV Toggle` 和 `State`。
 
 | 实体名 | 含义 |
 | --- | --- |
 | `Action Busy` | 当前是否正在执行模拟按键或等待动作确认；显示“开/关”或 `on/off`。 |
-| `Action State` | 当前动作状态。常见值包括 `idle`、`pulse_sw1`、`pulse_sw2`、`pulse_uv`、`pending_start_small`、`pending_start_large`、`confirming_*`、`refused_*`、`timeout_*`。 |
+| `Action State` | 当前动作状态。常见值包括 `idle`、`pulse_sw1`、`pulse_sw2`、`pulse_uv`、`queued_uv_*`、`confirming_*`、`refused_*`、`timeout_*`。 |
 | `Action Result` | 最近一次动作结果或事件。刚启动时通常是 `boot`；成功确认时会出现 `confirmed_*`；被拒绝或超时时会出现 `refused_*`、`timeout_*`。 |
 | `ADC Signature` | 当前 5 个面板节点的相对 ADC 签名，例如 `0HHHH`、`MHMHH`。这里的 `0/H/M/x` 是低/高/中间/其它区间，不是实际电压。 |
 | `Classified State` | 仅由 ADC 签名和闪烁特征推导出的内部状态，可能是 `standby`、`running_small`、`running_large` 或 `unknown`。 |
 | `Confidence` | 当前内部识别结果的置信度，单位为百分比。数值越高，说明最近一段采样越像某个已知状态。 |
 | `ESPHome Version` | 当前设备运行时使用的 ESPHome 编译版本，用于 OTA 后核对固件环境。 |
+| `Fast State Candidate` | 2 秒快速窗口得到的运行状态候选值；`MHMHH` 在待机和小冰都会出现，因此它不一定会立刻成为对外状态。 |
+| `Fast Ratio 0HHHH` | 最近 2 秒窗口内，出现 `0HHHH` 签名的比例；该签名主要对应大冰运行。 |
+| `Fast Ratio MHMHH` | 最近 2 秒窗口内，出现 `MHMHH` 签名的比例；该签名对应小冰候选，也会出现在待机。 |
 | `Firmware Version` | 本项目固件版本，来自 YAML 里的 `project_version`。 |
 | `P1 Raw` - `P5 Raw` | `P1-P5` 的原始 ADC 读数，范围大致为 `0-4095`。直连 GPIO 且未共地时只能用于相对判断，不应换算成真实电压。 |
-| `Ratio 0HHHH` | 最近滚动采样窗口内，出现 `0HHHH` 签名的比例；该签名主要对应大冰运行。 |
-| `Ratio MHMHH` | 最近滚动采样窗口内，出现 `MHMHH` 签名的比例；该签名用于区分待机/小冰，再结合电源灯慢闪判断。 |
 | `Standby Blink Score` | 电源灯慢闪特征评分；越高越像待机状态。 |
+| `Standby Window Valid` | 16 秒慢窗口是否确认了待机慢闪。 |
 
-如果 `Classified State` 长期是 `unknown`，同时 `Confidence`、`Ratio 0HHHH`、`Ratio MHMHH` 和 `Standby Blink Score` 都很低，通常说明 `P1-P5` 接线、GPIO 映射或制冰机当前状态需要重新检查。
+如果 `Classified State` 长期是 `unknown`，同时 `Confidence`、`Fast Ratio 0HHHH`、`Fast Ratio MHMHH` 和 `Standby Blink Score` 都很低，通常说明 `P1-P5` 接线、GPIO 映射或制冰机当前状态需要重新检查。
 
 如果曾经用旧固件添加过同一块 ESP32-C3，Home Assistant 可能会保留旧 entity_id。此时可以在 HA 的实体设置中手动改名，或删除旧 ESPHome 设备后重新添加。
 
 <details>
-<summary>展开查看 Home Assistant 设备页面截图</summary>
+<summary>展开查看 Home Assistant 设备页面截图（旧版界面示例）</summary>
+
+当前版本主控件是 `Power` 与 `Large Ice` 两个开关；下图来自早期调试界面，若出现 `Mode` 字段，以本文实体列表为准。
 
 ![Home Assistant 中的 Chang Hong Ice Maker ESPHome 设备页面](docs/images/home-assistant-device-page.png)
 
@@ -255,30 +262,30 @@ sensor.chang_hong_ice_maker_esphome_esphome_version
 
 ### 开机运行
 
-在 Home Assistant 中把 `Mode` 设为：
+在 Home Assistant 中打开：
 
 ```text
-Small Ice
+Power
 ```
 
-或：
+制冰机从待机启动后会自动进入大冰模式，因此 `Large Ice` 会默认保持打开。
+
+### 切换大小冰
+
+制冰机运行时切换：
 
 ```text
 Large Ice
 ```
 
-如果当前制冰机处于待机，固件会先模拟“开关”短按启动机器，然后根据目标模式补一次“选择”短按。
-
-### 切换大小冰
-
-制冰机运行时，把 `Mode` 在 `Small Ice` 和 `Large Ice` 之间切换即可。
+打开表示大冰，关闭表示小冰。制冰机待机时不能切到小冰；如果在待机时关闭 `Large Ice`，固件会拒绝动作并恢复为打开。
 
 ### 关机待机
 
-把 `Mode` 设为：
+关闭：
 
 ```text
-Off
+Power
 ```
 
 固件会模拟“开关”短按，使制冰机回到待机。
@@ -300,10 +307,10 @@ UV Toggle
 1. 制冰机断电，接好 P1-P5。
 2. ESP32-C3 上电并连接 Wi-Fi。
 3. 制冰机上电进入待机。
-4. 等待 20-35 秒，确认 `State` 变为 `standby`。
-5. 在 HA 中选择 `Large Ice` 或 `Small Ice`，确认制冰机启动。
-6. 切换大小冰，确认面板指示灯和 HA 状态一致。
-7. 选择 `Off`，确认制冰机回到待机。
+4. 等待 20 秒左右，确认 `State` 变为 `standby`，`Power` 关闭，`Large Ice` 打开。
+5. 在 HA 中打开 `Power`，确认制冰机启动并进入大冰。
+6. 在运行状态切换 `Large Ice`，确认面板指示灯和 HA 状态一致。
+7. 关闭 `Power`，确认制冰机回到待机。
 8. 点击 `UV Toggle`，确认长按动作能触发制冰机的 UV 功能。
 
 如果状态一直是 `unknown`，优先检查 P1-P5 是否接反、P3/GPIO2 是否影响启动、制冰机是否处于异常状态，以及 ESP32-C3 是否仍能稳定连接 Wi-Fi。
@@ -336,9 +343,11 @@ DEBUG level
 ```text
 state                 当前对外状态
 classifier            内部分类结果
+fast                  2 秒快速窗口状态候选
 sig                   当前 ADC 签名
-ratio_0HHHH           大冰运行签名占比
-ratio_MHMHH           待机/小冰签名占比
+fast_0HHHH            2 秒大冰运行签名占比
+fast_MHMHH            2 秒小冰/待机签名占比
+standby_valid         16 秒待机窗口是否有效
 blink                 待机慢闪评分
 action_state          当前动作状态
 action_result         最近动作结果
@@ -349,7 +358,7 @@ action_result         最近动作结果
 - 当前直连 GPIO 方案存在电气风险，ESP32-C3 GPIO 可能承受超过 3.3V 的面板电压。
 - 本项目不提供“缺水”和“冰满”的可靠 Home Assistant 状态实体。
 - UV 没有面板反馈，因此只提供按钮，不提供真实状态开关。
-- 待机和小冰运行的区分依赖电源灯慢闪特征，刚上电或刚切换后的几秒内可能显示 `unknown`。
+- 待机和小冰运行的区分依赖电源灯慢闪特征；运行状态通常 2-5 秒内更新，待机确认通常需要约 16-25 秒。
 - 如果 Home Assistant 快速连续发送冲突命令，固件会拒绝部分命令，以保护原面板扫描逻辑。
 
 ## 附录：面板电路图与 PCB 走线图
