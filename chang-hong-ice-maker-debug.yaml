@@ -1,0 +1,654 @@
+# ChangHongIceMakerESPHome debug firmware
+# Copyright (c) 2026 Ljzd-PRO <me@ljzd.link>
+# Project: https://github.com/Ljzd-PRO
+
+substitutions:
+  name: chang-hong-ice-maker-debug
+  friendly_name: Chang Hong Ice Maker Debug
+  project_version: "0.2.0-debug"
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  comment: >-
+    Passive diagnostic firmware for the five-wire Chang Hong ice-maker panel.
+    Author: Ljzd-PRO <me@ljzd.link> https://github.com/Ljzd-PRO
+  project:
+    name: "ljzd-pro.chang_hong_ice_maker_esphome_debug"
+    version: ${project_version}
+  platformio_options:
+    build_flags:
+      - -DARDUINO_USB_MODE=1
+      - -DARDUINO_USB_CDC_ON_BOOT=1
+
+esp32:
+  board: esp32-c3-devkitm-1
+  framework:
+    type: arduino
+
+logger:
+  baud_rate: 921600
+  level: DEBUG
+  logs:
+    sensor: WARN
+    text_sensor: WARN
+    select: WARN
+    button: WARN
+
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: ChangHongIceMakerDebug AP
+    password: !secret fallback_ap_password
+
+captive_portal:
+
+esp32_improv:
+  authorizer: none
+  wifi_timeout: 90s
+
+external_components:
+  - source:
+      type: local
+      path: components
+    components:
+      - chang_hong_ice_maker_panel_debug
+
+chang_hong_ice_maker_panel_debug:
+  id: panel_debug
+
+select:
+  - platform: template
+    id: debug_bias_mode
+    name: Bias Mode
+    icon: mdi:electric-switch
+    entity_category: diagnostic
+    options:
+      - Float
+      - Internal Pullup
+      - Internal Pulldown
+    update_interval: 1s
+    lambda: |-
+      return {id(panel_debug).bias_mode_text()};
+    set_action:
+      - lambda: |-
+          id(panel_debug).set_bias_mode(x);
+
+button:
+  - platform: template
+    id: debug_restore_float
+    name: Restore Floating Inputs
+    icon: mdi:restore
+    entity_category: diagnostic
+    on_press:
+      - lambda: |-
+          id(panel_debug).set_bias_mode("Float");
+
+text_sensor:
+  - platform: template
+    id: debug_firmware_version
+    name: Firmware Version
+    icon: mdi:tag-outline
+    entity_category: diagnostic
+    update_interval: 60s
+    lambda: |-
+      return {"${project_version}"};
+
+  - platform: version
+    id: debug_esphome_version
+    name: ESPHome Version
+    icon: mdi:chip
+    entity_category: diagnostic
+    hide_timestamp: true
+    hide_hash: true
+
+  - platform: template
+    id: debug_bias_mode_text
+    name: Bias Mode Text
+    icon: mdi:electric-switch
+    entity_category: diagnostic
+    update_interval: 1s
+    lambda: |-
+      return {id(panel_debug).bias_mode_text()};
+
+  - platform: template
+    id: debug_adc_signature
+    name: ADC Signature
+    icon: mdi:pulse
+    entity_category: diagnostic
+    update_interval: 1s
+    lambda: |-
+      return {id(panel_debug).signature_text()};
+
+  - platform: template
+    id: debug_adc_backend
+    name: ADC Backend
+    icon: mdi:chip
+    entity_category: diagnostic
+    update_interval: 5s
+    lambda: |-
+      return {id(panel_debug).adc_backend_text()};
+
+  - platform: template
+    id: debug_adc_calibration
+    name: ADC Calibration
+    icon: mdi:tune-variant
+    entity_category: diagnostic
+    update_interval: 5s
+    lambda: |-
+      return {id(panel_debug).adc_calibration_text()};
+
+  - platform: template
+    id: debug_digital_mask
+    name: Digital Mask
+    icon: mdi:memory
+    entity_category: diagnostic
+    update_interval: 1s
+    lambda: |-
+      return {id(panel_debug).digital_mask_text()};
+
+sensor:
+  - platform: template
+    id: debug_sample_rate
+    name: Sample Rate
+    icon: mdi:speedometer
+    unit_of_measurement: Hz
+    accuracy_decimals: 1
+    entity_category: diagnostic
+    update_interval: 1s
+    lambda: |-
+      return id(panel_debug).sample_rate_hz();
+
+  - platform: template
+    id: debug_target_sample_rate
+    name: Target Sample Rate
+    icon: mdi:speedometer-medium
+    unit_of_measurement: Hz
+    accuracy_decimals: 1
+    entity_category: diagnostic
+    update_interval: 5s
+    lambda: |-
+      return id(panel_debug).target_sample_rate_hz();
+
+  - platform: template
+    id: debug_adc_error_rate
+    name: ADC Error Rate
+    icon: mdi:alert-circle-outline
+    unit_of_measurement: "%"
+    accuracy_decimals: 2
+    entity_category: diagnostic
+    update_interval: 1s
+    lambda: |-
+      return id(panel_debug).adc_error_rate();
+
+  - platform: template
+    id: debug_ratio_0hhhh
+    name: Ratio 0HHHH
+    icon: mdi:chart-bar
+    unit_of_measurement: "%"
+    accuracy_decimals: 1
+    entity_category: diagnostic
+    update_interval: 1s
+    lambda: |-
+      return id(panel_debug).ratio_0hhhh();
+
+  - platform: template
+    id: debug_ratio_mhmhh
+    name: Ratio MHMHH
+    icon: mdi:chart-bar
+    unit_of_measurement: "%"
+    accuracy_decimals: 1
+    entity_category: diagnostic
+    update_interval: 1s
+    lambda: |-
+      return id(panel_debug).ratio_mhmhh();
+
+  - platform: template
+    id: debug_ratio_active_hhhh
+    name: Ratio Active HHHH
+    icon: mdi:chart-bar
+    unit_of_measurement: "%"
+    accuracy_decimals: 1
+    entity_category: diagnostic
+    update_interval: 1s
+    lambda: |-
+      return id(panel_debug).ratio_active_hhhh();
+
+  - platform: template
+    id: debug_p1_mean
+    name: P1 Mean
+    icon: mdi:sine-wave
+    accuracy_decimals: 1
+    entity_category: diagnostic
+    update_interval: 1s
+    lambda: |-
+      return id(panel_debug).raw_mean(0);
+
+  - platform: template
+    id: debug_p2_mean
+    name: P2 Mean
+    icon: mdi:sine-wave
+    accuracy_decimals: 1
+    entity_category: diagnostic
+    update_interval: 1s
+    lambda: |-
+      return id(panel_debug).raw_mean(1);
+
+  - platform: template
+    id: debug_p3_mean
+    name: P3 Mean
+    icon: mdi:sine-wave
+    accuracy_decimals: 1
+    entity_category: diagnostic
+    update_interval: 1s
+    lambda: |-
+      return id(panel_debug).raw_mean(2);
+
+  - platform: template
+    id: debug_p4_mean
+    name: P4 Mean
+    icon: mdi:sine-wave
+    accuracy_decimals: 1
+    entity_category: diagnostic
+    update_interval: 1s
+    lambda: |-
+      return id(panel_debug).raw_mean(3);
+
+  - platform: template
+    id: debug_p5_mean
+    name: P5 Mean
+    icon: mdi:sine-wave
+    accuracy_decimals: 1
+    entity_category: diagnostic
+    update_interval: 1s
+    lambda: |-
+      return id(panel_debug).raw_mean(4);
+
+  - platform: template
+    id: debug_p1_mv_mean
+    name: P1 Mean mV
+    icon: mdi:sine-wave
+    unit_of_measurement: mV
+    accuracy_decimals: 1
+    entity_category: diagnostic
+    update_interval: 1s
+    lambda: |-
+      return id(panel_debug).calibrated_mv_mean(0);
+
+  - platform: template
+    id: debug_p2_mv_mean
+    name: P2 Mean mV
+    icon: mdi:sine-wave
+    unit_of_measurement: mV
+    accuracy_decimals: 1
+    entity_category: diagnostic
+    update_interval: 1s
+    lambda: |-
+      return id(panel_debug).calibrated_mv_mean(1);
+
+  - platform: template
+    id: debug_p3_mv_mean
+    name: P3 Mean mV
+    icon: mdi:sine-wave
+    unit_of_measurement: mV
+    accuracy_decimals: 1
+    entity_category: diagnostic
+    update_interval: 1s
+    lambda: |-
+      return id(panel_debug).calibrated_mv_mean(2);
+
+  - platform: template
+    id: debug_p4_mv_mean
+    name: P4 Mean mV
+    icon: mdi:sine-wave
+    unit_of_measurement: mV
+    accuracy_decimals: 1
+    entity_category: diagnostic
+    update_interval: 1s
+    lambda: |-
+      return id(panel_debug).calibrated_mv_mean(3);
+
+  - platform: template
+    id: debug_p5_mv_mean
+    name: P5 Mean mV
+    icon: mdi:sine-wave
+    unit_of_measurement: mV
+    accuracy_decimals: 1
+    entity_category: diagnostic
+    update_interval: 1s
+    lambda: |-
+      return id(panel_debug).calibrated_mv_mean(4);
+
+  - platform: template
+    id: debug_p1_min
+    name: P1 Min
+    icon: mdi:arrow-collapse-down
+    accuracy_decimals: 1
+    entity_category: diagnostic
+    update_interval: 1s
+    lambda: |-
+      return id(panel_debug).raw_min(0);
+
+  - platform: template
+    id: debug_p2_min
+    name: P2 Min
+    icon: mdi:arrow-collapse-down
+    accuracy_decimals: 1
+    entity_category: diagnostic
+    update_interval: 1s
+    lambda: |-
+      return id(panel_debug).raw_min(1);
+
+  - platform: template
+    id: debug_p3_min
+    name: P3 Min
+    icon: mdi:arrow-collapse-down
+    accuracy_decimals: 1
+    entity_category: diagnostic
+    update_interval: 1s
+    lambda: |-
+      return id(panel_debug).raw_min(2);
+
+  - platform: template
+    id: debug_p4_min
+    name: P4 Min
+    icon: mdi:arrow-collapse-down
+    accuracy_decimals: 1
+    entity_category: diagnostic
+    update_interval: 1s
+    lambda: |-
+      return id(panel_debug).raw_min(3);
+
+  - platform: template
+    id: debug_p5_min
+    name: P5 Min
+    icon: mdi:arrow-collapse-down
+    accuracy_decimals: 1
+    entity_category: diagnostic
+    update_interval: 1s
+    lambda: |-
+      return id(panel_debug).raw_min(4);
+
+  - platform: template
+    id: debug_p1_max
+    name: P1 Max
+    icon: mdi:arrow-collapse-up
+    accuracy_decimals: 1
+    entity_category: diagnostic
+    update_interval: 1s
+    lambda: |-
+      return id(panel_debug).raw_max(0);
+
+  - platform: template
+    id: debug_p2_max
+    name: P2 Max
+    icon: mdi:arrow-collapse-up
+    accuracy_decimals: 1
+    entity_category: diagnostic
+    update_interval: 1s
+    lambda: |-
+      return id(panel_debug).raw_max(1);
+
+  - platform: template
+    id: debug_p3_max
+    name: P3 Max
+    icon: mdi:arrow-collapse-up
+    accuracy_decimals: 1
+    entity_category: diagnostic
+    update_interval: 1s
+    lambda: |-
+      return id(panel_debug).raw_max(2);
+
+  - platform: template
+    id: debug_p4_max
+    name: P4 Max
+    icon: mdi:arrow-collapse-up
+    accuracy_decimals: 1
+    entity_category: diagnostic
+    update_interval: 1s
+    lambda: |-
+      return id(panel_debug).raw_max(3);
+
+  - platform: template
+    id: debug_p5_max
+    name: P5 Max
+    icon: mdi:arrow-collapse-up
+    accuracy_decimals: 1
+    entity_category: diagnostic
+    update_interval: 1s
+    lambda: |-
+      return id(panel_debug).raw_max(4);
+
+  - platform: template
+    id: debug_p1_stddev
+    name: P1 StdDev
+    icon: mdi:sigma
+    accuracy_decimals: 1
+    entity_category: diagnostic
+    update_interval: 1s
+    lambda: |-
+      return id(panel_debug).raw_stddev(0);
+
+  - platform: template
+    id: debug_p2_stddev
+    name: P2 StdDev
+    icon: mdi:sigma
+    accuracy_decimals: 1
+    entity_category: diagnostic
+    update_interval: 1s
+    lambda: |-
+      return id(panel_debug).raw_stddev(1);
+
+  - platform: template
+    id: debug_p3_stddev
+    name: P3 StdDev
+    icon: mdi:sigma
+    accuracy_decimals: 1
+    entity_category: diagnostic
+    update_interval: 1s
+    lambda: |-
+      return id(panel_debug).raw_stddev(2);
+
+  - platform: template
+    id: debug_p4_stddev
+    name: P4 StdDev
+    icon: mdi:sigma
+    accuracy_decimals: 1
+    entity_category: diagnostic
+    update_interval: 1s
+    lambda: |-
+      return id(panel_debug).raw_stddev(3);
+
+  - platform: template
+    id: debug_p5_stddev
+    name: P5 StdDev
+    icon: mdi:sigma
+    accuracy_decimals: 1
+    entity_category: diagnostic
+    update_interval: 1s
+    lambda: |-
+      return id(panel_debug).raw_stddev(4);
+
+  - platform: template
+    id: debug_p1_duty
+    name: P1 Digital Duty
+    icon: mdi:percent-outline
+    unit_of_measurement: "%"
+    accuracy_decimals: 1
+    entity_category: diagnostic
+    update_interval: 1s
+    lambda: |-
+      return id(panel_debug).digital_duty(0);
+
+  - platform: template
+    id: debug_p2_duty
+    name: P2 Digital Duty
+    icon: mdi:percent-outline
+    unit_of_measurement: "%"
+    accuracy_decimals: 1
+    entity_category: diagnostic
+    update_interval: 1s
+    lambda: |-
+      return id(panel_debug).digital_duty(1);
+
+  - platform: template
+    id: debug_p3_duty
+    name: P3 Digital Duty
+    icon: mdi:percent-outline
+    unit_of_measurement: "%"
+    accuracy_decimals: 1
+    entity_category: diagnostic
+    update_interval: 1s
+    lambda: |-
+      return id(panel_debug).digital_duty(2);
+
+  - platform: template
+    id: debug_p4_duty
+    name: P4 Digital Duty
+    icon: mdi:percent-outline
+    unit_of_measurement: "%"
+    accuracy_decimals: 1
+    entity_category: diagnostic
+    update_interval: 1s
+    lambda: |-
+      return id(panel_debug).digital_duty(3);
+
+  - platform: template
+    id: debug_p5_duty
+    name: P5 Digital Duty
+    icon: mdi:percent-outline
+    unit_of_measurement: "%"
+    accuracy_decimals: 1
+    entity_category: diagnostic
+    update_interval: 1s
+    lambda: |-
+      return id(panel_debug).digital_duty(4);
+
+  - platform: template
+    id: debug_p1_edges
+    name: P1 Edges
+    icon: mdi:swap-horizontal
+    accuracy_decimals: 0
+    entity_category: diagnostic
+    update_interval: 1s
+    lambda: |-
+      return id(panel_debug).edge_count(0);
+
+  - platform: template
+    id: debug_p2_edges
+    name: P2 Edges
+    icon: mdi:swap-horizontal
+    accuracy_decimals: 0
+    entity_category: diagnostic
+    update_interval: 1s
+    lambda: |-
+      return id(panel_debug).edge_count(1);
+
+  - platform: template
+    id: debug_p3_edges
+    name: P3 Edges
+    icon: mdi:swap-horizontal
+    accuracy_decimals: 0
+    entity_category: diagnostic
+    update_interval: 1s
+    lambda: |-
+      return id(panel_debug).edge_count(2);
+
+  - platform: template
+    id: debug_p4_edges
+    name: P4 Edges
+    icon: mdi:swap-horizontal
+    accuracy_decimals: 0
+    entity_category: diagnostic
+    update_interval: 1s
+    lambda: |-
+      return id(panel_debug).edge_count(3);
+
+  - platform: template
+    id: debug_p5_edges
+    name: P5 Edges
+    icon: mdi:swap-horizontal
+    accuracy_decimals: 0
+    entity_category: diagnostic
+    update_interval: 1s
+    lambda: |-
+      return id(panel_debug).edge_count(4);
+
+  - platform: template
+    id: debug_delta_p5_p1
+    name: Delta P5 P1
+    icon: mdi:vector-difference
+    accuracy_decimals: 1
+    entity_category: diagnostic
+    update_interval: 1s
+    lambda: |-
+      return id(panel_debug).pair_delta_mean(0);
+
+  - platform: template
+    id: debug_delta_p5_p2
+    name: Delta P5 P2
+    icon: mdi:vector-difference
+    accuracy_decimals: 1
+    entity_category: diagnostic
+    update_interval: 1s
+    lambda: |-
+      return id(panel_debug).pair_delta_mean(1);
+
+  - platform: template
+    id: debug_delta_p1_p2
+    name: Delta P1 P2
+    icon: mdi:vector-difference
+    accuracy_decimals: 1
+    entity_category: diagnostic
+    update_interval: 1s
+    lambda: |-
+      return id(panel_debug).pair_delta_mean(2);
+
+  - platform: template
+    id: debug_delta_p1_p3
+    name: Delta P1 P3
+    icon: mdi:vector-difference
+    accuracy_decimals: 1
+    entity_category: diagnostic
+    update_interval: 1s
+    lambda: |-
+      return id(panel_debug).pair_delta_mean(3);
+
+  - platform: template
+    id: debug_delta_p3_p4
+    name: Delta P3 P4
+    icon: mdi:vector-difference
+    accuracy_decimals: 1
+    entity_category: diagnostic
+    update_interval: 1s
+    lambda: |-
+      return id(panel_debug).pair_delta_mean(4);
+
+  - platform: template
+    id: debug_delta_p2_p4
+    name: Delta P2 P4
+    icon: mdi:vector-difference
+    accuracy_decimals: 1
+    entity_category: diagnostic
+    update_interval: 1s
+    lambda: |-
+      return id(panel_debug).pair_delta_mean(5);
+
+  - platform: template
+    id: debug_delta_p1_p4
+    name: Delta P1 P4
+    icon: mdi:vector-difference
+    accuracy_decimals: 1
+    entity_category: diagnostic
+    update_interval: 1s
+    lambda: |-
+      return id(panel_debug).pair_delta_mean(6);
