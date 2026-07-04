@@ -45,6 +45,7 @@ class ChangHongIceMakerESPHome : public Component {
   std::string classified_state_text() const;
   std::string mode_text() const;
   std::string signature_text() const;
+  std::string fast_state_candidate_text() const;
   std::string action_state_text() const;
   std::string action_result_text() const;
   bool action_busy() const;
@@ -53,6 +54,7 @@ class ChangHongIceMakerESPHome : public Component {
   float blink_score() const { return this->blink_score_; }
   float ratio_large_signature() const { return this->ratio_large_signature_; }
   float ratio_mhmhh_signature() const { return this->ratio_mhmhh_signature_; }
+  bool standby_window_valid() const { return this->standby_window_valid_; }
   float raw_p1() const { return this->last_raw_[0]; }
   float raw_p2() const { return this->last_raw_[1]; }
   float raw_p3() const { return this->last_raw_[2]; }
@@ -62,9 +64,13 @@ class ChangHongIceMakerESPHome : public Component {
  protected:
   static constexpr uint8_t PIN_COUNT = 5;
   static constexpr uint8_t BIN_COUNT = 64;
+  static constexpr uint8_t FAST_WINDOW_BINS = 4;
+  static constexpr uint8_t STANDBY_WINDOW_BINS = 32;
   static constexpr uint32_t SAMPLE_INTERVAL_US = 1000;
   static constexpr uint32_t BIN_INTERVAL_MS = 500;
-  static constexpr uint32_t EVALUATE_INTERVAL_MS = 1000;
+  static constexpr uint32_t FAST_WINDOW_MS = FAST_WINDOW_BINS * BIN_INTERVAL_MS;
+  static constexpr uint32_t STANDBY_WINDOW_MS = STANDBY_WINDOW_BINS * BIN_INTERVAL_MS;
+  static constexpr uint32_t EVALUATE_INTERVAL_MS = FAST_WINDOW_MS;
   static constexpr uint32_t LOG_INTERVAL_MS = 5000;
   static constexpr uint32_t FIXED_WIFI_SYNC_INTERVAL_MS = 10000;
   static constexpr uint32_t FIXED_WIFI_PREF_KEY = 0x1CE51CE5UL;
@@ -72,6 +78,13 @@ class ChangHongIceMakerESPHome : public Component {
   static constexpr uint32_t SHORT_PRESS_COOLDOWN_MS = 800;
   static constexpr uint32_t UV_COOLDOWN_MS = 1500;
   static constexpr uint8_t UV_QUEUE_MAX = 4;
+  static constexpr float LARGE_SIGNATURE_THRESHOLD = 65.0f;
+  static constexpr float MHMHH_SIGNATURE_THRESHOLD = 55.0f;
+  static constexpr float STANDBY_P1_MIN_AMPLITUDE = 150.0f;
+  static constexpr float STANDBY_P1_MAX_AMPLITUDE = 800.0f;
+  static constexpr float STANDBY_MIN_DUTY = 0.08f;
+  static constexpr float STANDBY_MAX_DUTY = 0.55f;
+  static constexpr uint8_t RUNNING_UNKNOWN_LIMIT = 2;
 
   enum class PulseKind : uint8_t {
     NONE = 0,
@@ -101,6 +114,22 @@ class ChangHongIceMakerESPHome : public Component {
     std::array<uint64_t, PIN_COUNT> raw_sum{};
   };
 
+  struct WindowStats {
+    uint8_t bins{0};
+    uint32_t total{0};
+    uint32_t sig_0hhhh{0};
+    uint32_t sig_mhmhh{0};
+    std::array<uint64_t, PIN_COUNT> raw_sum{};
+  };
+
+  struct BlinkStats {
+    bool valid{false};
+    float score{0.0f};
+    float amplitude{0.0f};
+    float duty{0.0f};
+    uint8_t transitions{0};
+  };
+
   void configure_inputs_only_();
   void setup_fixed_wifi_preferences_();
   void service_fixed_wifi_preferences_();
@@ -117,8 +146,9 @@ class ChangHongIceMakerESPHome : public Component {
   void advance_bin_if_needed_();
   void reset_bin_(uint8_t index);
   void evaluate_();
+  WindowStats calculate_window_stats_(uint8_t window_bins) const;
+  BlinkStats calculate_standby_blink_stats_(uint8_t window_bins) const;
   void update_exposed_state_(PanelState classified, uint32_t now_ms);
-  float calculate_blink_score_() const;
   void log_summary_(bool force = false);
   char bucket_(uint16_t value) const;
   bool signature_is_0hhhh_(const char *signature) const;
@@ -149,10 +179,16 @@ class ChangHongIceMakerESPHome : public Component {
 
   PanelState classified_state_{PanelState::UNKNOWN};
   PanelState exposed_state_{PanelState::UNKNOWN};
+  PanelState fast_state_candidate_{PanelState::UNKNOWN};
   float confidence_{0.0f};
   float blink_score_{0.0f};
   float ratio_large_signature_{0.0f};
   float ratio_mhmhh_signature_{0.0f};
+  bool standby_window_valid_{false};
+  float standby_p1_amplitude_{0.0f};
+  float standby_p1_duty_{0.0f};
+  uint8_t standby_p1_transitions_{0};
+  uint8_t running_unknown_windows_{0};
 
   bool pulse_active_{false};
   PulseKind pulse_kind_{PulseKind::NONE};

@@ -27,8 +27,8 @@ void ChangHongIceMakerESPHome::setup() {
 
   ESP_LOGI(TAG, "ChangHongIceMakerESPHome direct GPIO mode starting");
   ESP_LOGI(TAG, "GPIO mapping: P1=GPIO0 P2=GPIO1 P3=GPIO2 P4=GPIO3 P5=GPIO4");
-  ESP_LOGI(TAG, "ADC sample interval=%u us, window=%u ms, bins=%u",
-           SAMPLE_INTERVAL_US, BIN_INTERVAL_MS * BIN_COUNT, BIN_COUNT);
+  ESP_LOGI(TAG, "ADC sample interval=%u us, fast window=%u ms, standby window=%u ms, bins=%u",
+           SAMPLE_INTERVAL_US, FAST_WINDOW_MS, STANDBY_WINDOW_MS, BIN_COUNT);
   ESP_LOGI(TAG, "Buckets: 0<100, H>3995, M=1500..2500, x=other");
   ESP_LOGW(TAG, "Direct floating GPIO mode is accepted-risk; keep panel pins input-only except explicit pulses");
 }
@@ -40,7 +40,7 @@ void ChangHongIceMakerESPHome::dump_config() {
   ESP_LOGCONFIG(TAG, "  P3: GPIO%u", this->pins_[2]);
   ESP_LOGCONFIG(TAG, "  P4: GPIO%u", this->pins_[3]);
   ESP_LOGCONFIG(TAG, "  P5: GPIO%u", this->pins_[4]);
-  ESP_LOGCONFIG(TAG, "  Sampling: 1 kHz ADC, 32 s rolling signature window");
+  ESP_LOGCONFIG(TAG, "  Sampling: 1 kHz ADC, 2 s fast window, 16 s standby window");
 }
 
 void ChangHongIceMakerESPHome::loop() {
@@ -114,10 +114,12 @@ bool ChangHongIceMakerESPHome::request_power(bool target_on) {
   const uint32_t now = millis();
   this->optimistic_kind_ = OptimisticKind::POWER;
   this->optimistic_power_on_ = target_on;
+  this->optimistic_mode_ = target_on ? PendingMode::LARGE : PendingMode::NONE;
+  this->pending_mode_after_power_on_ = PendingMode::NONE;
   this->optimistic_state_ = target_on ? PanelState::STARTING : PanelState::STOPPING;
   this->optimistic_until_ms_ = now + 35000;
   this->exposed_state_ = this->optimistic_state_;
-  ESP_LOGI(TAG, "Power optimistic state=%s until classifier confirms or times out",
+  ESP_LOGI(TAG, "Power optimistic state=%s until classifier confirms or times out; startup default is Large Ice",
            target_on ? "ON" : "OFF");
   return true;
 }
@@ -138,6 +140,17 @@ bool ChangHongIceMakerESPHome::request_large_ice(bool target_large) {
     this->record_event_("refused_pending_confirmation");
     ESP_LOGW(TAG, "Size request %s refused: previous action is still pending confirmation",
              target_large ? "LARGE" : "SMALL");
+    return false;
+  }
+
+  if (this->power_known() && !this->power_on()) {
+    if (target_large) {
+      this->record_event_("accepted_default_large_while_off");
+      ESP_LOGI(TAG, "Size request LARGE accepted as standby default; no select pulse sent");
+      return true;
+    }
+    this->record_event_("refused_not_running");
+    ESP_LOGW(TAG, "Size request SMALL refused: machine is standby/off and always starts in Large Ice");
     return false;
   }
 
@@ -190,25 +203,18 @@ bool ChangHongIceMakerESPHome::request_mode(const std::string &target_mode) {
     return this->request_power(false);
   }
 
-  const PendingMode target_pending = target_large ? PendingMode::LARGE : PendingMode::SMALL;
-
   if (this->size_known()) {
     this->pending_mode_after_power_on_ = PendingMode::NONE;
     return this->request_large_ice(target_large);
   }
 
   if (this->power_known() && !this->power_on()) {
-    if (!this->start_pulse_(PulseKind::SW1_OD, 1, 100)) {
+    if (target_small) {
+      this->record_event_("refused_not_running");
+      ESP_LOGW(TAG, "Mode request Small Ice refused from standby: this machine always starts in Large Ice");
       return false;
     }
-
-    const uint32_t now = millis();
-    this->optimistic_kind_ = OptimisticKind::MODE;
-    this->optimistic_until_ms_ = now + 45000;
-    this->set_pending_mode_target_(target_pending);
-    ESP_LOGI(TAG, "Mode optimistic state=%s; will correct size after startup if needed",
-             target_mode.c_str());
-    return true;
+    return this->request_power(true);
   }
 
   this->record_event_("refused_unknown_state");
@@ -252,7 +258,8 @@ bool ChangHongIceMakerESPHome::power_on() const {
 }
 
 bool ChangHongIceMakerESPHome::size_known() const {
-  if ((this->optimistic_kind_ == OptimisticKind::SIZE || this->optimistic_kind_ == OptimisticKind::MODE) &&
+  if ((this->optimistic_kind_ == OptimisticKind::SIZE || this->optimistic_kind_ == OptimisticKind::MODE ||
+       this->optimistic_kind_ == OptimisticKind::POWER) &&
       static_cast<int32_t>(millis() - this->optimistic_until_ms_) < 0) {
     return this->optimistic_mode_ == PendingMode::SMALL || this->optimistic_mode_ == PendingMode::LARGE;
   }
@@ -261,15 +268,19 @@ bool ChangHongIceMakerESPHome::size_known() const {
 }
 
 bool ChangHongIceMakerESPHome::large_ice() const {
-  if ((this->optimistic_kind_ == OptimisticKind::SIZE || this->optimistic_kind_ == OptimisticKind::MODE) &&
+  if ((this->optimistic_kind_ == OptimisticKind::SIZE || this->optimistic_kind_ == OptimisticKind::MODE ||
+       this->optimistic_kind_ == OptimisticKind::POWER) &&
       static_cast<int32_t>(millis() - this->optimistic_until_ms_) < 0) {
     return this->optimistic_mode_ == PendingMode::LARGE;
+  }
+  if (this->power_known() && !this->power_on()) {
+    return true;
   }
   return this->exposed_state_ == PanelState::RUNNING_LARGE;
 }
 
 bool ChangHongIceMakerESPHome::mode_known() const {
-  return this->power_known() || this->size_known();
+  return this->power_known() && (!this->power_on() || this->size_known());
 }
 
 std::string ChangHongIceMakerESPHome::state_text() const {
@@ -295,6 +306,10 @@ std::string ChangHongIceMakerESPHome::mode_text() const {
 
 std::string ChangHongIceMakerESPHome::signature_text() const {
   return std::string(this->last_signature_);
+}
+
+std::string ChangHongIceMakerESPHome::fast_state_candidate_text() const {
+  return state_to_cstr_(this->fast_state_candidate_);
 }
 
 std::string ChangHongIceMakerESPHome::action_state_text() const {
@@ -600,50 +615,111 @@ void ChangHongIceMakerESPHome::reset_bin_(uint8_t index) {
 }
 
 void ChangHongIceMakerESPHome::evaluate_() {
-  uint32_t total = 0;
-  uint32_t sig_large = 0;
-  uint32_t sig_mhmhh = 0;
+  const WindowStats fast = this->calculate_window_stats_(FAST_WINDOW_BINS);
+  const WindowStats standby = this->calculate_window_stats_(STANDBY_WINDOW_BINS);
+  const BlinkStats blink = this->calculate_standby_blink_stats_(STANDBY_WINDOW_BINS);
 
-  for (const auto &bin : this->bins_) {
-    if (!bin.valid || bin.total == 0) {
-      continue;
-    }
-    total += bin.total;
-    sig_large += bin.sig_0hhhh;
-    sig_mhmhh += bin.sig_mhmhh;
-  }
-
-  if (total == 0) {
+  if (fast.total == 0) {
     this->ratio_large_signature_ = 0.0f;
     this->ratio_mhmhh_signature_ = 0.0f;
     this->blink_score_ = 0.0f;
+    this->standby_window_valid_ = false;
     this->confidence_ = 0.0f;
+    this->fast_state_candidate_ = PanelState::UNKNOWN;
     this->update_exposed_state_(PanelState::UNKNOWN, millis());
     return;
   }
 
-  this->ratio_large_signature_ = (100.0f * sig_large) / total;
-  this->ratio_mhmhh_signature_ = (100.0f * sig_mhmhh) / total;
-  this->blink_score_ = this->calculate_blink_score_();
+  this->ratio_large_signature_ = (100.0f * fast.sig_0hhhh) / fast.total;
+  this->ratio_mhmhh_signature_ = (100.0f * fast.sig_mhmhh) / fast.total;
+  const float standby_mhmhh_ratio = standby.total == 0 ? 0.0f : (100.0f * standby.sig_mhmhh) / standby.total;
+  this->blink_score_ = blink.score;
+  this->standby_p1_amplitude_ = blink.amplitude;
+  this->standby_p1_duty_ = blink.duty;
+  this->standby_p1_transitions_ = blink.transitions;
+  this->standby_window_valid_ = standby.bins >= STANDBY_WINDOW_BINS &&
+                                standby_mhmhh_ratio >= MHMHH_SIGNATURE_THRESHOLD &&
+                                blink.valid;
 
   PanelState classified = PanelState::UNKNOWN;
-  if (this->ratio_large_signature_ > 65.0f && this->blink_score_ < 60.0f) {
+  if (this->ratio_large_signature_ >= LARGE_SIGNATURE_THRESHOLD) {
+    this->fast_state_candidate_ = PanelState::RUNNING_LARGE;
+  } else if (this->ratio_mhmhh_signature_ >= MHMHH_SIGNATURE_THRESHOLD) {
+    this->fast_state_candidate_ = PanelState::RUNNING_SMALL;
+  } else {
+    this->fast_state_candidate_ = PanelState::UNKNOWN;
+  }
+
+  if (this->fast_state_candidate_ == PanelState::RUNNING_LARGE) {
     classified = PanelState::RUNNING_LARGE;
     this->confidence_ = this->ratio_large_signature_;
-  } else if (this->ratio_mhmhh_signature_ > 55.0f) {
-    if (this->blink_score_ >= 60.0f) {
-      classified = PanelState::STANDBY;
-      this->confidence_ = std::min(100.0f, (this->ratio_mhmhh_signature_ + this->blink_score_) * 0.5f);
-    } else {
+    this->running_unknown_windows_ = 0;
+  } else if (this->standby_window_valid_) {
+    classified = PanelState::STANDBY;
+    this->confidence_ = std::min(100.0f, (standby_mhmhh_ratio + this->blink_score_) * 0.5f);
+    this->running_unknown_windows_ = 0;
+  } else if (this->fast_state_candidate_ == PanelState::RUNNING_SMALL) {
+    const bool small_target_pending =
+        (this->optimistic_kind_ == OptimisticKind::SIZE || this->optimistic_kind_ == OptimisticKind::MODE) &&
+        this->optimistic_mode_ == PendingMode::SMALL;
+    const bool unknown_with_mature_non_standby_window =
+        this->exposed_state_ == PanelState::UNKNOWN && standby.bins >= STANDBY_WINDOW_BINS &&
+        !this->standby_window_valid_;
+    const bool allow_small =
+        is_running_(this->exposed_state_) || small_target_pending || unknown_with_mature_non_standby_window;
+
+    if (allow_small) {
       classified = PanelState::RUNNING_SMALL;
       this->confidence_ = this->ratio_mhmhh_signature_;
+      this->running_unknown_windows_ = 0;
+    } else if (this->exposed_state_ == PanelState::STANDBY && standby.bins < STANDBY_WINDOW_BINS) {
+      classified = PanelState::STANDBY;
+      this->confidence_ = this->ratio_mhmhh_signature_;
+    } else {
+      classified = PanelState::UNKNOWN;
+      this->confidence_ = this->ratio_mhmhh_signature_;
     }
+  } else if (is_running_(this->exposed_state_) && !this->optimistic_active_()) {
+    if (this->running_unknown_windows_ < RUNNING_UNKNOWN_LIMIT) {
+      this->running_unknown_windows_++;
+    }
+    if (this->running_unknown_windows_ >= RUNNING_UNKNOWN_LIMIT) {
+      classified = PanelState::UNKNOWN;
+      this->confidence_ = std::max(this->ratio_large_signature_, this->ratio_mhmhh_signature_);
+    } else {
+      classified = this->exposed_state_;
+      this->confidence_ = std::max(this->ratio_large_signature_, this->ratio_mhmhh_signature_);
+    }
+  } else if (this->exposed_state_ == PanelState::STANDBY && standby.bins < STANDBY_WINDOW_BINS) {
+    classified = PanelState::STANDBY;
+    this->confidence_ = this->ratio_mhmhh_signature_;
   } else {
+    this->running_unknown_windows_ = 0;
     this->confidence_ = std::max(this->ratio_large_signature_, this->ratio_mhmhh_signature_);
   }
 
   this->classified_state_ = classified;
   this->update_exposed_state_(classified, millis());
+}
+
+ChangHongIceMakerESPHome::WindowStats ChangHongIceMakerESPHome::calculate_window_stats_(uint8_t window_bins) const {
+  WindowStats stats{};
+  const uint8_t capped = std::min<uint8_t>(window_bins, BIN_COUNT);
+  for (uint8_t offset = 0; offset < capped; offset++) {
+    const uint8_t index = (this->current_bin_ + BIN_COUNT - offset) % BIN_COUNT;
+    const Bin &bin = this->bins_[index];
+    if (!bin.valid || bin.total == 0) {
+      continue;
+    }
+    stats.bins++;
+    stats.total += bin.total;
+    stats.sig_0hhhh += bin.sig_0hhhh;
+    stats.sig_mhmhh += bin.sig_mhmhh;
+    for (uint8_t i = 0; i < PIN_COUNT; i++) {
+      stats.raw_sum[i] += bin.raw_sum[i];
+    }
+  }
+  return stats;
 }
 
 void ChangHongIceMakerESPHome::update_exposed_state_(PanelState classified, uint32_t now_ms) {
@@ -688,12 +764,16 @@ void ChangHongIceMakerESPHome::update_exposed_state_(PanelState classified, uint
   this->exposed_state_ = this->optimistic_state_;
 }
 
-float ChangHongIceMakerESPHome::calculate_blink_score_() const {
+ChangHongIceMakerESPHome::BlinkStats ChangHongIceMakerESPHome::calculate_standby_blink_stats_(
+    uint8_t window_bins) const {
+  BlinkStats stats{};
   std::array<float, BIN_COUNT> p1_means{};
   uint8_t count = 0;
 
-  for (uint8_t offset = 0; offset < BIN_COUNT; offset++) {
-    const uint8_t index = (this->current_bin_ + 1 + offset) % BIN_COUNT;
+  const uint8_t capped = std::min<uint8_t>(window_bins, BIN_COUNT);
+  for (uint8_t reverse_offset = capped; reverse_offset > 0; reverse_offset--) {
+    const uint8_t offset = reverse_offset - 1;
+    const uint8_t index = (this->current_bin_ + BIN_COUNT - offset) % BIN_COUNT;
     const Bin &bin = this->bins_[index];
     if (!bin.valid || bin.total == 0) {
       continue;
@@ -701,8 +781,8 @@ float ChangHongIceMakerESPHome::calculate_blink_score_() const {
     p1_means[count++] = static_cast<float>(bin.raw_sum[0]) / static_cast<float>(bin.total);
   }
 
-  if (count < 16) {
-    return 0.0f;
+  if (count < capped) {
+    return stats;
   }
 
   float min_value = p1_means[0];
@@ -713,9 +793,7 @@ float ChangHongIceMakerESPHome::calculate_blink_score_() const {
   }
 
   const float amplitude = max_value - min_value;
-  if (amplitude < 150.0f) {
-    return 0.0f;
-  }
+  stats.amplitude = amplitude;
 
   const float threshold = min_value + amplitude * 0.5f;
   uint8_t high_count = 0;
@@ -735,56 +813,57 @@ float ChangHongIceMakerESPHome::calculate_blink_score_() const {
     }
   }
 
-  const float duration_s = static_cast<float>(count) * 0.5f;
-  const float expected_transitions = std::max(2.0f, duration_s / 2.0f);
-  const float transition_error = std::fabs(static_cast<float>(transitions) - expected_transitions) /
-                                 expected_transitions;
-  const float transition_score = std::max(0.0f, 1.0f - transition_error);
-  const float amplitude_score = std::min(1.0f, (amplitude - 150.0f) / 100.0f);
-
   const float duty = static_cast<float>(high_count) / static_cast<float>(count);
+  stats.duty = duty;
+  stats.transitions = transitions;
+
+  const bool amplitude_valid = amplitude >= STANDBY_P1_MIN_AMPLITUDE &&
+                               amplitude <= STANDBY_P1_MAX_AMPLITUDE;
+  const bool duty_valid = duty >= STANDBY_MIN_DUTY && duty <= STANDBY_MAX_DUTY;
+  const bool transition_valid = transitions >= 1;
+  stats.valid = amplitude_valid && duty_valid && transition_valid;
+
+  const float amplitude_score = amplitude <= STANDBY_P1_MIN_AMPLITUDE
+                                    ? 0.0f
+                                    : std::min(1.0f, (amplitude - STANDBY_P1_MIN_AMPLITUDE) / 100.0f);
+  const float transition_score = std::min(1.0f, static_cast<float>(transitions) / 2.0f);
+
   float duty_score = 0.0f;
-  if (duty >= 0.12f && duty <= 0.48f) {
+  if (duty_valid) {
     duty_score = 1.0f;
-  } else if (duty < 0.12f) {
-    duty_score = std::max(0.0f, duty / 0.12f);
+  } else if (duty < STANDBY_MIN_DUTY) {
+    duty_score = std::max(0.0f, duty / STANDBY_MIN_DUTY);
   } else {
-    duty_score = std::max(0.0f, (0.70f - duty) / 0.22f);
+    duty_score = std::max(0.0f, (0.70f - duty) / (0.70f - STANDBY_MAX_DUTY));
   }
 
-  return 100.0f * amplitude_score * transition_score * duty_score;
+  stats.score = 100.0f * amplitude_score * transition_score * duty_score;
+  return stats;
 }
 
 void ChangHongIceMakerESPHome::log_summary_(bool force) {
-  uint32_t total = 0;
-  std::array<uint64_t, PIN_COUNT> sums{};
-  for (const auto &bin : this->bins_) {
-    if (!bin.valid || bin.total == 0) {
-      continue;
-    }
-    total += bin.total;
-    for (uint8_t i = 0; i < PIN_COUNT; i++) {
-      sums[i] += bin.raw_sum[i];
-    }
-  }
+  const WindowStats standby = this->calculate_window_stats_(STANDBY_WINDOW_BINS);
 
-  if (total == 0 && !force) {
+  if (standby.total == 0 && !force) {
     ESP_LOGD(TAG, "summary: no ADC samples yet");
     return;
   }
 
-  const float p1 = total == 0 ? 0.0f : static_cast<float>(sums[0]) / total;
-  const float p2 = total == 0 ? 0.0f : static_cast<float>(sums[1]) / total;
-  const float p3 = total == 0 ? 0.0f : static_cast<float>(sums[2]) / total;
-  const float p4 = total == 0 ? 0.0f : static_cast<float>(sums[3]) / total;
-  const float p5 = total == 0 ? 0.0f : static_cast<float>(sums[4]) / total;
+  const float p1 = standby.total == 0 ? 0.0f : static_cast<float>(standby.raw_sum[0]) / standby.total;
+  const float p2 = standby.total == 0 ? 0.0f : static_cast<float>(standby.raw_sum[1]) / standby.total;
+  const float p3 = standby.total == 0 ? 0.0f : static_cast<float>(standby.raw_sum[2]) / standby.total;
+  const float p4 = standby.total == 0 ? 0.0f : static_cast<float>(standby.raw_sum[3]) / standby.total;
+  const float p5 = standby.total == 0 ? 0.0f : static_cast<float>(standby.raw_sum[4]) / standby.total;
 
   ESP_LOGD(TAG,
-           "state=%s classifier=%s sig=%s ratio_0HHHH=%.1f ratio_MHMHH=%.1f blink=%.1f conf=%.1f "
-           "mean=[%.0f,%.0f,%.0f,%.0f,%.0f]",
+           "state=%s classifier=%s fast=%s sig=%s fast_0HHHH=%.1f fast_MHMHH=%.1f standby_valid=%s "
+           "blink=%.1f amp=%.0f duty=%.2f trans=%u conf=%.1f mean16s=[%.0f,%.0f,%.0f,%.0f,%.0f]",
            state_to_cstr_(this->exposed_state_), state_to_cstr_(this->classified_state_),
-           this->last_signature_, this->ratio_large_signature_, this->ratio_mhmhh_signature_,
-           this->blink_score_, this->confidence_, p1, p2, p3, p4, p5);
+           state_to_cstr_(this->fast_state_candidate_), this->last_signature_,
+           this->ratio_large_signature_, this->ratio_mhmhh_signature_,
+           this->standby_window_valid_ ? "yes" : "no", this->blink_score_,
+           this->standby_p1_amplitude_, this->standby_p1_duty_,
+           this->standby_p1_transitions_, this->confidence_, p1, p2, p3, p4, p5);
 }
 
 char ChangHongIceMakerESPHome::bucket_(uint16_t value) const {
