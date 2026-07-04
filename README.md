@@ -42,7 +42,7 @@ ESPHome 的 `project.name` 字段使用 `author_name.project_name` 形式，并�
   - `starting`
   - `stopping`
   - `unknown`
-- 提供调试实体：快速状态候选、特征评分、ADC 签名、置信度、动作状态、P1-P5 原始读数等。
+- 提供 Home Assistant 诊断实体：动作状态、快速状态候选、特征评分、ADC 签名、置信度、P1-P5 原始读数等。
 - 提供固件版本和 ESPHome 编译版本诊断实体，方便 OTA 后确认设备运行的固件。
 - 支持 ESPHome Native API、OTA、串口日志、Fallback AP 配网和 BLE Improv 配网。
 
@@ -155,6 +155,8 @@ UV 长按:   GPIO2 低电平约 5000 ms
 ```
 
 动作结束后，所有 GPIO 会恢复为输入状态。固件内部有 busy 状态和冷却时间，用于避免 Home Assistant 快速连续点击造成重入。
+
+开关和大小冰属于互斥控制：如果已有动作正在执行、等待确认或处于冷却期，新的开关/大小冰请求通常会被拒绝。`UV Toggle` 是例外：它没有状态反馈，固件会把连续点击放入一个短队列中依次执行长按；队列满时才拒绝新的 UV 请求。
 
 ## 硬件准备
 
@@ -303,47 +305,45 @@ ls -1 /dev/cu.usb* /dev/tty.usb*
 Chang Hong Ice Maker ESPHome
 ```
 
-常用实体：
+主控和状态实体：
 
 ```text
 switch.chang_hong_ice_maker_esphome_power
 switch.chang_hong_ice_maker_esphome_large_ice
 button.chang_hong_ice_maker_esphome_uv_toggle
 sensor.chang_hong_ice_maker_esphome_state
-binary_sensor.chang_hong_ice_maker_esphome_action_busy
-binary_sensor.chang_hong_ice_maker_esphome_standby_window_valid
-sensor.chang_hong_ice_maker_esphome_action_state
-sensor.chang_hong_ice_maker_esphome_action_result
-sensor.chang_hong_ice_maker_esphome_firmware_version
-sensor.chang_hong_ice_maker_esphome_esphome_version
 ```
 
 ### 诊断实体说明
 
-这些实体会出现在 Home Assistant 设备页面的 `诊断` 分组里，主要用于确认接线、判断识别是否稳定，以及排查远程按键动作。日常使用通常只需要 `Power`、`Large Ice`、`UV Toggle` 和 `State`。
+这些实体在 YAML 中标记为 `entity_category: diagnostic`，会出现在 Home Assistant 设备页面的 `诊断` 分组里。它们不是日常控制入口，主要用于确认接线、核对 OTA 版本、观察状态识别是否稳定，以及排查远程按键动作。
 
-| 实体名 | 含义 |
-| --- | --- |
-| `Action Busy` | 当前是否正在执行模拟按键或等待动作确认；显示“开/关”或 `on/off`。 |
-| `Action State` | 当前动作状态。常见值包括 `idle`、`pulse_sw1`、`pulse_sw2`、`pulse_uv`、`queued_uv_*`、`confirming_*`、`refused_*`、`timeout_*`。 |
-| `Action Result` | 最近一次动作结果或事件。刚启动时通常是 `boot`；成功确认时会出现 `confirmed_*`；被拒绝或超时时会出现 `refused_*`、`timeout_*`。 |
-| `ADC Signature` | 当前 5 个面板节点的相对 ADC 签名，例如 `0HHHH`、`MHMHH`。这里的 `0/H/M/x` 是低/高/中间/其它区间，不是实际电压。 |
-| `Classified State` | 固件内部分类状态，已经经过基础状态机护栏，但不包含 HA 命令执行期间的乐观显示。通常用于和 `State` 对照排查。 |
-| `Confidence` | 当前内部识别结果的置信度，单位为百分比。数值越高，说明最近一段采样越像某个已知状态。 |
-| `ESPHome Version` | 当前设备运行时使用的 ESPHome 编译版本，用于 OTA 后核对固件环境。 |
-| `Delta P2 P4` | 最近 1 秒窗口内 `P2-P4` 的平均差分，用于区分小冰和待机。 |
-| `Delta P5 P2` | 最近 1 秒窗口内 `P5-P2` 的平均差分，用于区分小冰和待机。 |
-| `Fast State Candidate` | 1 秒特征窗口经过连续确认后的快速状态候选值。它允许短暂波动，不等同于最终对外 `State`。 |
-| `Fast Ratio 0HHHH` | 最近 1 秒窗口内，出现 `0HHHH` 签名的比例；该签名主要对应大冰运行。 |
-| `Fast Ratio MHMHH` | 最近 1 秒窗口内，出现 `MHMHH` 签名的比例；该签名对应小冰和待机的共同候选。 |
-| `Feature State Candidate` | 最近 1 秒窗口直接得到的特征候选，尚未经过连续确认，波动会比 `Fast State Candidate` 更明显。 |
-| `Firmware Version` | 本项目固件版本，来自 YAML 里的 `project_version`。 |
-| `P1 Raw` - `P5 Raw` | `P1-P5` 的原始 ADC 读数，范围大致为 `0-4095`。直连 GPIO 且未共地时只能用于相对判断，不应换算成真实电压。 |
-| `P2 StdDev` | 最近 1 秒窗口内 `P2` 原始读数的标准差，是区分小冰和待机的主要特征之一。 |
-| `Small Feature Score` | 小冰特征投票得分，范围 `0-3`；达到 `2` 通常视为小冰候选。 |
-| `Standby Blink Score` | 电源灯慢闪特征评分；越高越像待机状态。 |
-| `Standby Feature Score` | 待机特征投票得分，范围 `0-3`；达到 `2` 通常视为待机候选。 |
-| `Standby Window Valid` | 16 秒慢窗口是否确认了待机慢闪。 |
+普通自动化建议只依赖主实体：`Power`、`Large Ice`、`UV Toggle` 和 `State`。诊断实体可以用于临时调试或高级告警，但不建议把短窗口候选值、原始 ADC 值或特征分数直接作为制冰机真实状态。
+
+诊断实体的完整 entity_id 会以 `chang_hong_ice_maker_esphome_` 为前缀，例如 `Action Busy` 对应 `binary_sensor.chang_hong_ice_maker_esphome_action_busy`。
+
+| 实体名 | 类别 | 含义 |
+| --- | --- | --- |
+| `Action Busy` | 动作执行 | 当前是否正在模拟按键、等待动作确认，或存在待执行的 UV 队列；为 `on` 时，开关/大小冰请求通常会被拒绝，UV 请求可能进入队列或在队列满时被拒绝。 |
+| `Action State` | 动作执行 | 当前动作状态。常见值包括 `idle`、`pulse_sw1`、`pulse_sw2`、`pulse_uv`、`queued_uv_*`、`confirming_*`、`refused_*`、`timeout_*`；其中 `queued_uv_*` 只表示 UV 长按队列。 |
+| `Action Result` | 动作执行 | 最近一次动作结果或事件。刚启动时通常是 `boot`；成功确认时会出现 `confirmed_*`；被拒绝或超时时会出现 `refused_*`、`timeout_*`。 |
+| `Classified State` | 状态识别 | 固件内部分类状态，已经经过基础状态机护栏，但不包含 HA 命令执行期间的乐观显示。通常用于和对外 `State` 对照排查。 |
+| `Fast State Candidate` | 状态识别 | 1 秒特征窗口经过连续确认后的快速状态候选值。它允许短暂波动，不等同于最终对外 `State`。 |
+| `Feature State Candidate` | 状态识别 | 最近 1 秒窗口直接得到的特征候选，尚未经过连续确认，波动会比 `Fast State Candidate` 更明显。 |
+| `Confidence` | 状态识别 | 当前内部识别结果的置信度，单位为百分比。数值越高，说明最近一段采样越像某个已知状态。 |
+| `ADC Signature` | 采样特征 | 当前 5 个面板节点的相对 ADC 签名，例如 `0HHHH`、`MHMHH`。这里的 `0/H/M/x` 是低/高/中间/其它区间，不是实际电压。 |
+| `Fast Ratio 0HHHH` | 采样特征 | 最近 1 秒窗口内出现 `0HHHH` 签名的比例；该签名主要对应大冰运行。 |
+| `Fast Ratio MHMHH` | 采样特征 | 最近 1 秒窗口内出现 `MHMHH` 签名的比例；该签名是小冰和待机的共同候选，需要二级特征继续区分。 |
+| `Delta P2 P4` | 采样特征 | 最近 1 秒窗口内 `P2-P4` 的平均差分，用于区分小冰和待机。 |
+| `Delta P5 P2` | 采样特征 | 最近 1 秒窗口内 `P5-P2` 的平均差分，用于区分小冰和待机。 |
+| `P2 StdDev` | 采样特征 | 最近 1 秒窗口内 `P2` 原始读数的标准差，是区分小冰和待机的主要特征之一。 |
+| `Small Feature Score` | 采样特征 | 小冰特征投票得分，范围 `0-3`；达到 `2` 通常视为小冰候选。 |
+| `Standby Feature Score` | 采样特征 | 待机特征投票得分，范围 `0-3`；达到 `2` 通常视为待机候选。 |
+| `Standby Blink Score` | 慢窗口兜底 | 电源灯慢闪特征评分；越高越像待机状态。 |
+| `Standby Window Valid` | 慢窗口兜底 | 16 秒慢窗口是否确认了待机慢闪。开启时，待机判定通常更可靠。 |
+| `P1 Raw` - `P5 Raw` | 原始采样 | `P1-P5` 的原始 ADC 读数，范围大致为 `0-4095`。直连 GPIO 且未共地时只能用于相对判断，不应换算成真实电压。 |
+| `Firmware Version` | 版本信息 | 本项目固件版本，来自 YAML 里的 `project_version`。 |
+| `ESPHome Version` | 版本信息 | 当前设备运行时使用的 ESPHome 编译版本，用于 OTA 后核对固件环境。 |
 
 如果 `Feature State Candidate` 或 `Fast State Candidate` 偶发 `unknown`、`running_small`、`standby` 跳动，但 `State`、`Power`、`Large Ice` 没有变化，通常不需要处理。这是直连浮地 ADC 信号的短窗口波动，固件会用状态机护栏过滤掉。
 
@@ -406,6 +406,8 @@ UV Toggle
 ```
 
 固件会模拟长按“选择”键约 5 秒。原面板没有可靠的 UV 状态反馈，所以这里提供的是按钮，不是开关。开启或关闭后的真实 UV 状态需要以制冰机自身表现为准。
+
+如果连续点击 `UV Toggle`，固件会把 UV 长按请求排队执行。由于 UV 是翻转动作且没有状态反馈，只有在你明确知道当前 UV 是开还是关时，才能根据点击次数推断最终状态。
 
 ## 安装后检查
 
@@ -470,9 +472,9 @@ action_result         最近动作结果
 
 - 当前直连 GPIO 方案存在电气风险，ESP32-C3 GPIO 可能承受超过 3.3V 的面板电压。
 - 本项目不提供“缺水”和“冰满”的可靠 Home Assistant 状态实体。
-- UV 没有面板反馈，因此只提供按钮，不提供真实状态开关。
+- UV 没有面板反馈，因此只提供按钮，不提供真实状态开关；连续点击会排队执行翻转动作，但固件无法知道最终 UV 真实状态。
 - 待机和小冰运行都可能出现 `MHMHH` 签名。固件会优先用 1 秒特征投票区分，并用 16 秒电源灯慢闪窗口兜底；诊断候选允许波动，但主状态应保持稳定。
-- 如果 Home Assistant 快速连续发送冲突命令，固件会拒绝部分命令，以保护原面板扫描逻辑。
+- 如果 Home Assistant 快速连续发送冲突命令，固件会拒绝部分开关/大小冰命令，以保护原面板扫描逻辑。
 
 ## 附录：面板电路图与 PCB 走线图
 

@@ -42,7 +42,7 @@ ESPHome's `project.name` field follows the `author_name.project_name` convention
   - `starting`
   - `stopping`
   - `unknown`
-- Exposes debug entities such as fast state candidate, feature scores, ADC signature, confidence, action state, and raw P1-P5 values.
+- Exposes Home Assistant diagnostic entities such as action state, fast state candidate, feature scores, ADC signature, confidence, and raw P1-P5 values.
 - Exposes firmware and ESPHome build version diagnostic entities for OTA verification.
 - Supports ESPHome Native API, OTA, serial logs, Fallback AP provisioning, and BLE Improv provisioning.
 
@@ -61,6 +61,8 @@ UV long press:      GPIO2 low for about 5000 ms
 ```
 
 After each action, all GPIOs are restored to input mode. The firmware also has a busy state and cooldown handling to avoid repeated Home Assistant clicks interfering with the original panel scan logic.
+
+Power and ice-size commands are mutually exclusive controls: if an action is already running, waiting for confirmation, or in cooldown, new power/ice-size requests are usually refused. `UV Toggle` is the exception. Because it has no state feedback, repeated UV clicks are placed into a short queue and executed as sequential long presses; new UV requests are refused only when the queue is full.
 
 ## Hardware
 
@@ -209,47 +211,45 @@ After successful setup, the Home Assistant device name is:
 Chang Hong Ice Maker ESPHome
 ```
 
-Common entities:
+Main control and state entities:
 
 ```text
 switch.chang_hong_ice_maker_esphome_power
 switch.chang_hong_ice_maker_esphome_large_ice
 button.chang_hong_ice_maker_esphome_uv_toggle
 sensor.chang_hong_ice_maker_esphome_state
-binary_sensor.chang_hong_ice_maker_esphome_action_busy
-binary_sensor.chang_hong_ice_maker_esphome_standby_window_valid
-sensor.chang_hong_ice_maker_esphome_action_state
-sensor.chang_hong_ice_maker_esphome_action_result
-sensor.chang_hong_ice_maker_esphome_firmware_version
-sensor.chang_hong_ice_maker_esphome_esphome_version
 ```
 
 ### Diagnostic Entities
 
-These entities appear in the `Diagnostics` section of the Home Assistant device page. They are mainly for wiring checks, state-classification debugging, and remote-button troubleshooting. For normal use, you usually only need `Power`, `Large Ice`, `UV Toggle`, and `State`.
+These entities are marked with `entity_category: diagnostic` in YAML and appear in the `Diagnostics` section of the Home Assistant device page. They are not normal control surfaces. They exist for wiring checks, OTA version verification, state-classification debugging, and remote-button troubleshooting.
 
-| Entity | Meaning |
-| --- | --- |
-| `Action Busy` | Whether the firmware is currently simulating a button press or waiting for action confirmation. |
-| `Action State` | Current action state. Common values include `idle`, `pulse_sw1`, `pulse_sw2`, `pulse_uv`, `queued_uv_*`, `confirming_*`, `refused_*`, and `timeout_*`. |
-| `Action Result` | Latest action result or event. It is usually `boot` after startup; successful confirmation appears as `confirmed_*`; refused or timed-out actions appear as `refused_*` or `timeout_*`. |
-| `ADC Signature` | Relative ADC signature of the five panel nodes, such as `0HHHH` or `MHMHH`. The symbols `0/H/M/x` mean low/high/mid/other buckets, not real voltages. |
-| `Classified State` | Internal state inferred only from ADC signatures and blink behavior: `standby`, `running_small`, `running_large`, or `unknown`. |
-| `Confidence` | Confidence of the current internal classification, in percent. Higher values mean recent samples better match a known state. |
-| `ESPHome Version` | ESPHome build version running on the device, useful after OTA updates. |
-| `Delta P2 P4` | Average `P2-P4` delta over the recent 1-second window, used to separate small ice from standby. |
-| `Delta P5 P2` | Average `P5-P2` delta over the recent 1-second window, used to separate small ice from standby. |
-| `Fast State Candidate` | Fast state candidate from the 1-second feature window after consecutive confirmation. |
-| `Fast Ratio 0HHHH` | Percentage of the recent 1-second window matching `0HHHH`, mainly associated with large-ice running. |
-| `Fast Ratio MHMHH` | Percentage of the recent 1-second window matching `MHMHH`, shared by small ice and standby. |
-| `Feature State Candidate` | Immediate candidate from the recent 1-second feature window before consecutive confirmation. |
-| `Firmware Version` | Project firmware version from `project_version` in YAML. |
-| `P1 Raw` - `P5 Raw` | Raw ADC readings for P1-P5, roughly `0-4095`. With direct floating GPIO wiring, these are only relative readings and must not be converted to real voltages. |
-| `P2 StdDev` | Standard deviation of P2 raw readings over the recent 1-second window; one of the main small/standby features. |
-| `Small Feature Score` | Small-ice feature vote score from `0-3`; `2` or more is normally treated as a small-ice candidate. |
-| `Standby Blink Score` | Score for the slow power-LED blink pattern. Higher values indicate a stronger standby signature. |
-| `Standby Feature Score` | Standby feature vote score from `0-3`; `2` or more is normally treated as a standby candidate. |
-| `Standby Window Valid` | Whether the 16-second slow window currently confirms standby blink behavior. |
+Normal automations should use only the main entities: `Power`, `Large Ice`, `UV Toggle`, and `State`. Diagnostic entities are useful for temporary debugging or advanced alerts, but short-window candidates, raw ADC values, and feature scores should not be treated as the real ice-maker state.
+
+Full diagnostic entity IDs use the `chang_hong_ice_maker_esphome_` prefix. For example, `Action Busy` maps to `binary_sensor.chang_hong_ice_maker_esphome_action_busy`.
+
+| Entity | Group | Meaning |
+| --- | --- | --- |
+| `Action Busy` | Action execution | Whether the firmware is currently simulating a button press, waiting for action confirmation, or holding pending UV toggles. When it is `on`, power/ice-size requests are usually refused; UV requests may be queued or refused when the queue is full. |
+| `Action State` | Action execution | Current action state. Common values include `idle`, `pulse_sw1`, `pulse_sw2`, `pulse_uv`, `queued_uv_*`, `confirming_*`, `refused_*`, and `timeout_*`; `queued_uv_*` only refers to the UV long-press queue. |
+| `Action Result` | Action execution | Latest action result or event. It is usually `boot` after startup; successful confirmation appears as `confirmed_*`; refused or timed-out actions appear as `refused_*` or `timeout_*`. |
+| `Classified State` | State detection | Internal classification after the basic state-machine guardrails, but without Home Assistant optimistic display during command execution. Compare it with the public `State` when debugging. |
+| `Fast State Candidate` | State detection | Fast state candidate from the 1-second feature window after consecutive confirmation. It may briefly fluctuate and is not the final public `State`. |
+| `Feature State Candidate` | State detection | Immediate candidate from the recent 1-second feature window before consecutive confirmation. It is expected to fluctuate more than `Fast State Candidate`. |
+| `Confidence` | State detection | Confidence of the current internal classification, in percent. Higher values mean recent samples better match a known state. |
+| `ADC Signature` | Sampling feature | Relative ADC signature of the five panel nodes, such as `0HHHH` or `MHMHH`. The symbols `0/H/M/x` mean low/high/mid/other buckets, not real voltages. |
+| `Fast Ratio 0HHHH` | Sampling feature | Percentage of the recent 1-second window matching `0HHHH`, mainly associated with large-ice running. |
+| `Fast Ratio MHMHH` | Sampling feature | Percentage of the recent 1-second window matching `MHMHH`. This signature is shared by small ice and standby, so secondary features are required. |
+| `Delta P2 P4` | Sampling feature | Average `P2-P4` delta over the recent 1-second window, used to separate small ice from standby. |
+| `Delta P5 P2` | Sampling feature | Average `P5-P2` delta over the recent 1-second window, used to separate small ice from standby. |
+| `P2 StdDev` | Sampling feature | Standard deviation of P2 raw readings over the recent 1-second window; one of the main small/standby features. |
+| `Small Feature Score` | Sampling feature | Small-ice feature vote score from `0-3`; `2` or more is normally treated as a small-ice candidate. |
+| `Standby Feature Score` | Sampling feature | Standby feature vote score from `0-3`; `2` or more is normally treated as a standby candidate. |
+| `Standby Blink Score` | Slow-window fallback | Score for the slow power-LED blink pattern. Higher values indicate a stronger standby signature. |
+| `Standby Window Valid` | Slow-window fallback | Whether the 16-second slow window currently confirms standby blink behavior. When it is on, standby classification is usually more reliable. |
+| `P1 Raw` - `P5 Raw` | Raw sampling | Raw ADC readings for P1-P5, roughly `0-4095`. With direct floating GPIO wiring, these are only relative readings and must not be converted to real voltages. |
+| `Firmware Version` | Version info | Project firmware version from `project_version` in YAML. |
+| `ESPHome Version` | Version info | ESPHome build version running on the device, useful after OTA updates. |
 
 If `Classified State` stays `unknown` and `Confidence`, `Fast Ratio 0HHHH`, `Fast Ratio MHMHH`, and `Standby Blink Score` all remain low, check P1-P5 wiring, GPIO mapping, and the actual ice-maker state.
 
@@ -311,6 +311,8 @@ UV Toggle
 
 The firmware simulates a long Select press for about 5 seconds. The original panel does not provide reliable UV state feedback, so this is a button, not a switch. Confirm the real UV state from the ice maker itself.
 
+If `UV Toggle` is clicked repeatedly, the firmware queues the UV long-press requests and executes them in order. Since UV is a toggle action with no feedback, you can only infer the final UV state from the number of clicks when you already know the initial UV state.
+
 ## Post-Install Check
 
 After connecting the device to the ice maker for the first time:
@@ -318,7 +320,7 @@ After connecting the device to the ice maker for the first time:
 1. Unplug the ice maker and connect P1-P5.
 2. Power the ESP32-C3 and wait for Wi-Fi connection.
 3. Power the ice maker to standby.
-4. Wait about 20 seconds and confirm `State` becomes `standby`, `Power` is off, and `Large Ice` is on.
+4. Wait about 5-20 seconds and confirm `State` becomes `standby`, `Power` is off, and `Large Ice` is on.
 5. Turn on `Power` in Home Assistant and confirm the ice maker starts in large-ice mode.
 6. Toggle `Large Ice` while running and confirm the panel LEDs and Home Assistant state agree.
 7. Turn off `Power` and confirm the ice maker returns to standby.
@@ -376,9 +378,9 @@ action_result         latest action result
 
 - The current direct-GPIO design has electrical risk; ESP32-C3 GPIOs may see panel voltages above 3.3V.
 - This project does not provide reliable Home Assistant entities for no-water or ice-full status.
-- UV has no panel feedback, so it is exposed as a button rather than a real state switch.
-- Distinguishing standby from small-ice running depends on the slow power-LED blink feature; running state usually updates within 2-5 seconds, while standby confirmation usually needs about 16-25 seconds.
-- If Home Assistant sends conflicting commands too quickly, the firmware refuses some actions to protect the original panel scanning logic.
+- UV has no panel feedback, so it is exposed as a button rather than a real state switch. Repeated clicks are queued as toggle actions, but the firmware cannot know the final real UV state.
+- Standby and small-ice running can both produce the `MHMHH` signature. The firmware first separates them with 1-second feature voting and keeps the 16-second power-LED blink window as a fallback; diagnostic candidates may fluctuate, but the public state should remain stable.
+- If Home Assistant sends conflicting commands too quickly, the firmware refuses some power/ice-size commands to protect the original panel scanning logic.
 
 ## Appendix: Panel Schematics And PCB Trace
 
