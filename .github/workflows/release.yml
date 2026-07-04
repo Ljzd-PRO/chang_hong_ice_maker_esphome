@@ -27,7 +27,7 @@ permissions:
 env:
   ESPHOME_YAML: chang-hong-ice-maker-esphome.yaml
   NODE_NAME: chang-hong-ice-maker-esphome
-  CHANGE_LOG: CHANGE_LOG.md
+  CHANGELOG: CHANGELOG.md
 
 jobs:
   release:
@@ -121,7 +121,7 @@ jobs:
 
           tag = os.environ["RELEASE_TAG"]
           node_name = os.environ["NODE_NAME"]
-          changelog_path = pathlib.Path(os.environ["CHANGE_LOG"])
+          changelog_path = pathlib.Path(os.environ["CHANGELOG"])
 
           if not changelog_path.exists():
               sys.exit(f"{changelog_path} does not exist")
