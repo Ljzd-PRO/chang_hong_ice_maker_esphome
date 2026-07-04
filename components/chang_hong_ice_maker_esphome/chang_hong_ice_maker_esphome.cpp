@@ -30,6 +30,11 @@ void ChangHongIceMakerESPHome::setup() {
   ESP_LOGI(TAG, "ADC sample interval=%u us, fast window=%u ms, standby window=%u ms, bins=%u",
            SAMPLE_INTERVAL_US, FAST_WINDOW_MS, STANDBY_WINDOW_MS, BIN_COUNT);
   ESP_LOGI(TAG, "Buckets: 0<100, H>3995, M=1500..2500, x=other");
+  ESP_LOGI(TAG, "Feature classifier: small score P2_stddev<=%.0f, P2-P4>=%.0f, P5-P2<=%.0f; "
+                "standby score P2_stddev>=%.0f, P2-P4<=%.0f, P5-P2>=%.0f; confirm=%u",
+           SMALL_P2_STDDEV_MAX, SMALL_DELTA_P2_P4_MIN, SMALL_DELTA_P5_P2_MAX,
+           STANDBY_P2_STDDEV_MIN, STANDBY_DELTA_P2_P4_MAX, STANDBY_DELTA_P5_P2_MIN,
+           FEATURE_CONFIRM_COUNT);
   ESP_LOGW(TAG, "Direct floating GPIO mode is accepted-risk; keep panel pins input-only except explicit pulses");
 }
 
@@ -40,7 +45,7 @@ void ChangHongIceMakerESPHome::dump_config() {
   ESP_LOGCONFIG(TAG, "  P3: GPIO%u", this->pins_[2]);
   ESP_LOGCONFIG(TAG, "  P4: GPIO%u", this->pins_[3]);
   ESP_LOGCONFIG(TAG, "  P5: GPIO%u", this->pins_[4]);
-  ESP_LOGCONFIG(TAG, "  Sampling: 1 kHz ADC, 2 s fast window, 16 s standby window");
+  ESP_LOGCONFIG(TAG, "  Sampling: 1 kHz ADC, 1 s feature window, 16 s standby fallback window");
 }
 
 void ChangHongIceMakerESPHome::loop() {
@@ -310,6 +315,10 @@ std::string ChangHongIceMakerESPHome::signature_text() const {
 
 std::string ChangHongIceMakerESPHome::fast_state_candidate_text() const {
   return state_to_cstr_(this->fast_state_candidate_);
+}
+
+std::string ChangHongIceMakerESPHome::feature_state_candidate_text() const {
+  return state_to_cstr_(this->feature_state_candidate_);
 }
 
 std::string ChangHongIceMakerESPHome::action_state_text() const {
@@ -591,7 +600,10 @@ void ChangHongIceMakerESPHome::sample_once_() {
   }
   for (uint8_t i = 0; i < PIN_COUNT; i++) {
     bin.raw_sum[i] += this->last_raw_[i];
+    bin.raw_sq_sum[i] += static_cast<uint64_t>(this->last_raw_[i]) * static_cast<uint64_t>(this->last_raw_[i]);
   }
+  bin.delta_p2_p4_sum += static_cast<int32_t>(this->last_raw_[1]) - static_cast<int32_t>(this->last_raw_[3]);
+  bin.delta_p5_p2_sum += static_cast<int32_t>(this->last_raw_[4]) - static_cast<int32_t>(this->last_raw_[1]);
 }
 
 void ChangHongIceMakerESPHome::advance_bin_if_needed_() {
@@ -612,6 +624,9 @@ void ChangHongIceMakerESPHome::reset_bin_(uint8_t index) {
   this->bins_[index].sig_0hhhh = 0;
   this->bins_[index].sig_mhmhh = 0;
   this->bins_[index].raw_sum.fill(0);
+  this->bins_[index].raw_sq_sum.fill(0);
+  this->bins_[index].delta_p2_p4_sum = 0;
+  this->bins_[index].delta_p5_p2_sum = 0;
 }
 
 void ChangHongIceMakerESPHome::evaluate_() {
@@ -622,9 +637,17 @@ void ChangHongIceMakerESPHome::evaluate_() {
   if (fast.total == 0) {
     this->ratio_large_signature_ = 0.0f;
     this->ratio_mhmhh_signature_ = 0.0f;
+    this->small_feature_score_ = 0.0f;
+    this->standby_feature_score_ = 0.0f;
+    this->p2_stddev_ = 0.0f;
+    this->delta_p2_p4_ = 0.0f;
+    this->delta_p5_p2_ = 0.0f;
     this->blink_score_ = 0.0f;
     this->standby_window_valid_ = false;
     this->confidence_ = 0.0f;
+    this->feature_state_candidate_ = PanelState::UNKNOWN;
+    this->previous_feature_candidate_ = PanelState::UNKNOWN;
+    this->feature_candidate_count_ = 0;
     this->fast_state_candidate_ = PanelState::UNKNOWN;
     this->update_exposed_state_(PanelState::UNKNOWN, millis());
     return;
@@ -632,6 +655,14 @@ void ChangHongIceMakerESPHome::evaluate_() {
 
   this->ratio_large_signature_ = (100.0f * fast.sig_0hhhh) / fast.total;
   this->ratio_mhmhh_signature_ = (100.0f * fast.sig_mhmhh) / fast.total;
+  this->p2_stddev_ = this->calculate_pin_stddev_(fast, 1);
+  this->delta_p2_p4_ = this->calculate_delta_mean_(fast.delta_p2_p4_sum, fast.total);
+  this->delta_p5_p2_ = this->calculate_delta_mean_(fast.delta_p5_p2_sum, fast.total);
+  const uint8_t small_score = this->calculate_small_feature_score_(fast);
+  const uint8_t standby_score = this->calculate_standby_feature_score_(fast);
+  this->small_feature_score_ = small_score;
+  this->standby_feature_score_ = standby_score;
+
   const float standby_mhmhh_ratio = standby.total == 0 ? 0.0f : (100.0f * standby.sig_mhmhh) / standby.total;
   this->blink_score_ = blink.score;
   this->standby_p1_amplitude_ = blink.amplitude;
@@ -641,44 +672,38 @@ void ChangHongIceMakerESPHome::evaluate_() {
                                 standby_mhmhh_ratio >= MHMHH_SIGNATURE_THRESHOLD &&
                                 blink.valid;
 
-  PanelState classified = PanelState::UNKNOWN;
+  PanelState feature_candidate = PanelState::UNKNOWN;
   if (this->ratio_large_signature_ >= LARGE_SIGNATURE_THRESHOLD) {
-    this->fast_state_candidate_ = PanelState::RUNNING_LARGE;
+    feature_candidate = PanelState::RUNNING_LARGE;
   } else if (this->ratio_mhmhh_signature_ >= MHMHH_SIGNATURE_THRESHOLD) {
-    this->fast_state_candidate_ = PanelState::RUNNING_SMALL;
-  } else {
-    this->fast_state_candidate_ = PanelState::UNKNOWN;
+    const bool small_match = small_score >= FEATURE_SCORE_THRESHOLD;
+    const bool standby_match = standby_score >= FEATURE_SCORE_THRESHOLD;
+    if (small_match && !standby_match) {
+      feature_candidate = PanelState::RUNNING_SMALL;
+    } else if (standby_match && !small_match) {
+      feature_candidate = PanelState::STANDBY;
+    }
   }
 
+  this->update_fast_candidate_(feature_candidate);
+
+  PanelState classified = PanelState::UNKNOWN;
   if (this->fast_state_candidate_ == PanelState::RUNNING_LARGE) {
     classified = PanelState::RUNNING_LARGE;
     this->confidence_ = this->ratio_large_signature_;
+    this->running_unknown_windows_ = 0;
+  } else if (this->fast_state_candidate_ == PanelState::RUNNING_SMALL) {
+    classified = PanelState::RUNNING_SMALL;
+    this->confidence_ = std::min(100.0f, (this->ratio_mhmhh_signature_ + this->small_feature_score_ * 33.333f) * 0.5f);
+    this->running_unknown_windows_ = 0;
+  } else if (this->fast_state_candidate_ == PanelState::STANDBY) {
+    classified = PanelState::STANDBY;
+    this->confidence_ = std::min(100.0f, (this->ratio_mhmhh_signature_ + this->standby_feature_score_ * 33.333f) * 0.5f);
     this->running_unknown_windows_ = 0;
   } else if (this->standby_window_valid_) {
     classified = PanelState::STANDBY;
     this->confidence_ = std::min(100.0f, (standby_mhmhh_ratio + this->blink_score_) * 0.5f);
     this->running_unknown_windows_ = 0;
-  } else if (this->fast_state_candidate_ == PanelState::RUNNING_SMALL) {
-    const bool small_target_pending =
-        (this->optimistic_kind_ == OptimisticKind::SIZE || this->optimistic_kind_ == OptimisticKind::MODE) &&
-        this->optimistic_mode_ == PendingMode::SMALL;
-    const bool unknown_with_mature_non_standby_window =
-        this->exposed_state_ == PanelState::UNKNOWN && standby.bins >= STANDBY_WINDOW_BINS &&
-        !this->standby_window_valid_;
-    const bool allow_small =
-        is_running_(this->exposed_state_) || small_target_pending || unknown_with_mature_non_standby_window;
-
-    if (allow_small) {
-      classified = PanelState::RUNNING_SMALL;
-      this->confidence_ = this->ratio_mhmhh_signature_;
-      this->running_unknown_windows_ = 0;
-    } else if (this->exposed_state_ == PanelState::STANDBY && standby.bins < STANDBY_WINDOW_BINS) {
-      classified = PanelState::STANDBY;
-      this->confidence_ = this->ratio_mhmhh_signature_;
-    } else {
-      classified = PanelState::UNKNOWN;
-      this->confidence_ = this->ratio_mhmhh_signature_;
-    }
   } else if (is_running_(this->exposed_state_) && !this->optimistic_active_()) {
     if (this->running_unknown_windows_ < RUNNING_UNKNOWN_LIMIT) {
       this->running_unknown_windows_++;
@@ -692,7 +717,7 @@ void ChangHongIceMakerESPHome::evaluate_() {
     }
   } else if (this->exposed_state_ == PanelState::STANDBY && standby.bins < STANDBY_WINDOW_BINS) {
     classified = PanelState::STANDBY;
-    this->confidence_ = this->ratio_mhmhh_signature_;
+    this->confidence_ = std::max(this->ratio_mhmhh_signature_, this->standby_feature_score_ * 33.333f);
   } else {
     this->running_unknown_windows_ = 0;
     this->confidence_ = std::max(this->ratio_large_signature_, this->ratio_mhmhh_signature_);
@@ -717,9 +742,90 @@ ChangHongIceMakerESPHome::WindowStats ChangHongIceMakerESPHome::calculate_window
     stats.sig_mhmhh += bin.sig_mhmhh;
     for (uint8_t i = 0; i < PIN_COUNT; i++) {
       stats.raw_sum[i] += bin.raw_sum[i];
+      stats.raw_sq_sum[i] += bin.raw_sq_sum[i];
     }
+    stats.delta_p2_p4_sum += bin.delta_p2_p4_sum;
+    stats.delta_p5_p2_sum += bin.delta_p5_p2_sum;
   }
   return stats;
+}
+
+void ChangHongIceMakerESPHome::update_fast_candidate_(PanelState feature_candidate) {
+  this->feature_state_candidate_ = feature_candidate;
+
+  if (feature_candidate == PanelState::UNKNOWN) {
+    this->previous_feature_candidate_ = PanelState::UNKNOWN;
+    this->feature_candidate_count_ = 0;
+    this->fast_state_candidate_ = PanelState::UNKNOWN;
+    return;
+  }
+
+  if (feature_candidate == this->previous_feature_candidate_) {
+    if (this->feature_candidate_count_ < FEATURE_CONFIRM_COUNT) {
+      this->feature_candidate_count_++;
+    }
+  } else {
+    this->previous_feature_candidate_ = feature_candidate;
+    this->feature_candidate_count_ = 1;
+  }
+
+  this->fast_state_candidate_ =
+      this->feature_candidate_count_ >= FEATURE_CONFIRM_COUNT ? feature_candidate : PanelState::UNKNOWN;
+}
+
+uint8_t ChangHongIceMakerESPHome::calculate_small_feature_score_(const WindowStats &stats) const {
+  if (stats.total == 0) {
+    return 0;
+  }
+
+  uint8_t score = 0;
+  if (this->calculate_pin_stddev_(stats, 1) <= SMALL_P2_STDDEV_MAX) {
+    score++;
+  }
+  if (this->calculate_delta_mean_(stats.delta_p2_p4_sum, stats.total) >= SMALL_DELTA_P2_P4_MIN) {
+    score++;
+  }
+  if (this->calculate_delta_mean_(stats.delta_p5_p2_sum, stats.total) <= SMALL_DELTA_P5_P2_MAX) {
+    score++;
+  }
+  return score;
+}
+
+uint8_t ChangHongIceMakerESPHome::calculate_standby_feature_score_(const WindowStats &stats) const {
+  if (stats.total == 0) {
+    return 0;
+  }
+
+  uint8_t score = 0;
+  if (this->calculate_pin_stddev_(stats, 1) >= STANDBY_P2_STDDEV_MIN) {
+    score++;
+  }
+  if (this->calculate_delta_mean_(stats.delta_p2_p4_sum, stats.total) <= STANDBY_DELTA_P2_P4_MAX) {
+    score++;
+  }
+  if (this->calculate_delta_mean_(stats.delta_p5_p2_sum, stats.total) >= STANDBY_DELTA_P5_P2_MIN) {
+    score++;
+  }
+  return score;
+}
+
+float ChangHongIceMakerESPHome::calculate_pin_stddev_(const WindowStats &stats, uint8_t pin_index) const {
+  if (stats.total == 0 || pin_index >= PIN_COUNT) {
+    return 0.0f;
+  }
+
+  const double total = static_cast<double>(stats.total);
+  const double mean = static_cast<double>(stats.raw_sum[pin_index]) / total;
+  const double mean_sq = static_cast<double>(stats.raw_sq_sum[pin_index]) / total;
+  const double variance = std::max(0.0, mean_sq - mean * mean);
+  return static_cast<float>(std::sqrt(variance));
+}
+
+float ChangHongIceMakerESPHome::calculate_delta_mean_(int64_t delta_sum, uint32_t total) const {
+  if (total == 0) {
+    return 0.0f;
+  }
+  return static_cast<float>(static_cast<double>(delta_sum) / static_cast<double>(total));
 }
 
 void ChangHongIceMakerESPHome::update_exposed_state_(PanelState classified, uint32_t now_ms) {
@@ -856,11 +962,16 @@ void ChangHongIceMakerESPHome::log_summary_(bool force) {
   const float p5 = standby.total == 0 ? 0.0f : static_cast<float>(standby.raw_sum[4]) / standby.total;
 
   ESP_LOGD(TAG,
-           "state=%s classifier=%s fast=%s sig=%s fast_0HHHH=%.1f fast_MHMHH=%.1f standby_valid=%s "
-           "blink=%.1f amp=%.0f duty=%.2f trans=%u conf=%.1f mean16s=[%.0f,%.0f,%.0f,%.0f,%.0f]",
+           "state=%s classifier=%s fast=%s feature=%s sig=%s fast_0HHHH=%.1f fast_MHMHH=%.1f "
+           "small_score=%.0f standby_score=%.0f p2_stddev=%.1f d_p2_p4=%.1f d_p5_p2=%.1f "
+           "standby_valid=%s blink=%.1f amp=%.0f duty=%.2f trans=%u conf=%.1f "
+           "mean16s=[%.0f,%.0f,%.0f,%.0f,%.0f]",
            state_to_cstr_(this->exposed_state_), state_to_cstr_(this->classified_state_),
-           state_to_cstr_(this->fast_state_candidate_), this->last_signature_,
+           state_to_cstr_(this->fast_state_candidate_), state_to_cstr_(this->feature_state_candidate_),
+           this->last_signature_,
            this->ratio_large_signature_, this->ratio_mhmhh_signature_,
+           this->small_feature_score_, this->standby_feature_score_,
+           this->p2_stddev_, this->delta_p2_p4_, this->delta_p5_p2_,
            this->standby_window_valid_ ? "yes" : "no", this->blink_score_,
            this->standby_p1_amplitude_, this->standby_p1_duty_,
            this->standby_p1_transitions_, this->confidence_, p1, p2, p3, p4, p5);

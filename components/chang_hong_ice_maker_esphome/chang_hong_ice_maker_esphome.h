@@ -46,6 +46,7 @@ class ChangHongIceMakerESPHome : public Component {
   std::string mode_text() const;
   std::string signature_text() const;
   std::string fast_state_candidate_text() const;
+  std::string feature_state_candidate_text() const;
   std::string action_state_text() const;
   std::string action_result_text() const;
   bool action_busy() const;
@@ -54,6 +55,11 @@ class ChangHongIceMakerESPHome : public Component {
   float blink_score() const { return this->blink_score_; }
   float ratio_large_signature() const { return this->ratio_large_signature_; }
   float ratio_mhmhh_signature() const { return this->ratio_mhmhh_signature_; }
+  float small_feature_score() const { return this->small_feature_score_; }
+  float standby_feature_score() const { return this->standby_feature_score_; }
+  float p2_stddev() const { return this->p2_stddev_; }
+  float delta_p2_p4() const { return this->delta_p2_p4_; }
+  float delta_p5_p2() const { return this->delta_p5_p2_; }
   bool standby_window_valid() const { return this->standby_window_valid_; }
   float raw_p1() const { return this->last_raw_[0]; }
   float raw_p2() const { return this->last_raw_[1]; }
@@ -64,7 +70,7 @@ class ChangHongIceMakerESPHome : public Component {
  protected:
   static constexpr uint8_t PIN_COUNT = 5;
   static constexpr uint8_t BIN_COUNT = 64;
-  static constexpr uint8_t FAST_WINDOW_BINS = 4;
+  static constexpr uint8_t FAST_WINDOW_BINS = 2;
   static constexpr uint8_t STANDBY_WINDOW_BINS = 32;
   static constexpr uint32_t SAMPLE_INTERVAL_US = 1000;
   static constexpr uint32_t BIN_INTERVAL_MS = 500;
@@ -84,6 +90,14 @@ class ChangHongIceMakerESPHome : public Component {
   static constexpr float STANDBY_P1_MAX_AMPLITUDE = 800.0f;
   static constexpr float STANDBY_MIN_DUTY = 0.08f;
   static constexpr float STANDBY_MAX_DUTY = 0.55f;
+  static constexpr float SMALL_P2_STDDEV_MAX = 650.0f;
+  static constexpr float SMALL_DELTA_P2_P4_MIN = -120.0f;
+  static constexpr float SMALL_DELTA_P5_P2_MAX = 80.0f;
+  static constexpr float STANDBY_P2_STDDEV_MIN = 700.0f;
+  static constexpr float STANDBY_DELTA_P2_P4_MAX = -145.0f;
+  static constexpr float STANDBY_DELTA_P5_P2_MIN = 120.0f;
+  static constexpr uint8_t FEATURE_SCORE_THRESHOLD = 2;
+  static constexpr uint8_t FEATURE_CONFIRM_COUNT = 2;
   static constexpr uint8_t RUNNING_UNKNOWN_LIMIT = 2;
 
   enum class PulseKind : uint8_t {
@@ -112,6 +126,9 @@ class ChangHongIceMakerESPHome : public Component {
     uint32_t sig_0hhhh{0};
     uint32_t sig_mhmhh{0};
     std::array<uint64_t, PIN_COUNT> raw_sum{};
+    std::array<uint64_t, PIN_COUNT> raw_sq_sum{};
+    int64_t delta_p2_p4_sum{0};
+    int64_t delta_p5_p2_sum{0};
   };
 
   struct WindowStats {
@@ -120,6 +137,9 @@ class ChangHongIceMakerESPHome : public Component {
     uint32_t sig_0hhhh{0};
     uint32_t sig_mhmhh{0};
     std::array<uint64_t, PIN_COUNT> raw_sum{};
+    std::array<uint64_t, PIN_COUNT> raw_sq_sum{};
+    int64_t delta_p2_p4_sum{0};
+    int64_t delta_p5_p2_sum{0};
   };
 
   struct BlinkStats {
@@ -148,6 +168,11 @@ class ChangHongIceMakerESPHome : public Component {
   void evaluate_();
   WindowStats calculate_window_stats_(uint8_t window_bins) const;
   BlinkStats calculate_standby_blink_stats_(uint8_t window_bins) const;
+  void update_fast_candidate_(PanelState feature_candidate);
+  uint8_t calculate_small_feature_score_(const WindowStats &stats) const;
+  uint8_t calculate_standby_feature_score_(const WindowStats &stats) const;
+  float calculate_pin_stddev_(const WindowStats &stats, uint8_t pin_index) const;
+  float calculate_delta_mean_(int64_t delta_sum, uint32_t total) const;
   void update_exposed_state_(PanelState classified, uint32_t now_ms);
   void log_summary_(bool force = false);
   char bucket_(uint16_t value) const;
@@ -180,10 +205,18 @@ class ChangHongIceMakerESPHome : public Component {
   PanelState classified_state_{PanelState::UNKNOWN};
   PanelState exposed_state_{PanelState::UNKNOWN};
   PanelState fast_state_candidate_{PanelState::UNKNOWN};
+  PanelState feature_state_candidate_{PanelState::UNKNOWN};
+  PanelState previous_feature_candidate_{PanelState::UNKNOWN};
+  uint8_t feature_candidate_count_{0};
   float confidence_{0.0f};
   float blink_score_{0.0f};
   float ratio_large_signature_{0.0f};
   float ratio_mhmhh_signature_{0.0f};
+  float small_feature_score_{0.0f};
+  float standby_feature_score_{0.0f};
+  float p2_stddev_{0.0f};
+  float delta_p2_p4_{0.0f};
+  float delta_p5_p2_{0.0f};
   bool standby_window_valid_{false};
   float standby_p1_amplitude_{0.0f};
   float standby_p1_duty_{0.0f};

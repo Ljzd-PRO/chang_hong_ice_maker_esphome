@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import csv
 import io
+import math
 import os
 from pathlib import Path
 import tarfile
@@ -13,9 +14,9 @@ import unittest
 
 BIN_COUNT = 64
 BIN_INTERVAL_US = 500_000
-FAST_WINDOW_BINS = 4
+FAST_WINDOW_BINS = 2
 STANDBY_WINDOW_BINS = 32
-EVALUATE_INTERVAL_US = 2_000_000
+EVALUATE_INTERVAL_US = 1_000_000
 
 LARGE_SIGNATURE_THRESHOLD = 65.0
 MHMHH_SIGNATURE_THRESHOLD = 55.0
@@ -23,6 +24,14 @@ STANDBY_P1_MIN_AMPLITUDE = 150.0
 STANDBY_P1_MAX_AMPLITUDE = 800.0
 STANDBY_MIN_DUTY = 0.08
 STANDBY_MAX_DUTY = 0.55
+SMALL_P2_STDDEV_MAX = 650.0
+SMALL_DELTA_P2_P4_MIN = -120.0
+SMALL_DELTA_P5_P2_MAX = 80.0
+STANDBY_P2_STDDEV_MIN = 700.0
+STANDBY_DELTA_P2_P4_MAX = -145.0
+STANDBY_DELTA_P5_P2_MIN = 120.0
+FEATURE_SCORE_THRESHOLD = 2
+FEATURE_CONFIRM_COUNT = 2
 RUNNING_UNKNOWN_LIMIT = 2
 
 
@@ -36,6 +45,9 @@ CAPTURES = {
     "sim_small_to_large": ("captures/20260628-213241-direct_sw2_sim_back_adc/raw.csv", "running_large"),
     "sim_power_off": ("captures/20260628-213639-direct_sw1_sim_power_adc/raw.csv", "standby"),
 }
+
+
+DMA_FIXTURE = Path(__file__).resolve().parent / "fixtures" / "debug_dma_summary.csv"
 
 
 def find_capture_archive() -> Path | None:
@@ -77,6 +89,27 @@ def bucket(value: int) -> str:
     return "x"
 
 
+def feature_scores_from_summary(row: dict[str, str]) -> tuple[int, int]:
+    p2_stddev = float(row["p2_stddev"])
+    delta_p2_p4 = float(row["delta_p2_p4"])
+    delta_p5_p2 = float(row["delta_p5_p2"])
+    small_score = sum(
+        [
+            p2_stddev <= SMALL_P2_STDDEV_MAX,
+            delta_p2_p4 >= SMALL_DELTA_P2_P4_MIN,
+            delta_p5_p2 <= SMALL_DELTA_P5_P2_MAX,
+        ]
+    )
+    standby_score = sum(
+        [
+            p2_stddev >= STANDBY_P2_STDDEV_MIN,
+            delta_p2_p4 <= STANDBY_DELTA_P2_P4_MAX,
+            delta_p5_p2 >= STANDBY_DELTA_P5_P2_MIN,
+        ]
+    )
+    return small_score, standby_score
+
+
 class FirmwareClassifier:
     """Small Python mirror of the ESPHome component's ADC classifier."""
 
@@ -87,17 +120,33 @@ class FirmwareClassifier:
         self.last_eval_us: int | None = None
         self.last_signature = "xxxxx"
         self.fast_state_candidate = "unknown"
+        self.feature_state_candidate = "unknown"
+        self.previous_feature_candidate = "unknown"
+        self.feature_candidate_count = 0
         self.exposed_state = "unknown"
         self.classified_state = "unknown"
         self.running_unknown_windows = 0
         self.ratio_0hhhh = 0.0
         self.ratio_mhmhh = 0.0
+        self.small_feature_score = 0
+        self.standby_feature_score = 0
+        self.p2_stddev = 0.0
+        self.delta_p2_p4 = 0.0
+        self.delta_p5_p2 = 0.0
         self.blink_score = 0.0
         self.standby_window_valid = False
 
     @staticmethod
     def _empty_bin() -> dict[str, object]:
-        return {"total": 0, "sig_0hhhh": 0, "sig_mhmhh": 0, "raw_sum": [0, 0, 0, 0, 0]}
+        return {
+            "total": 0,
+            "sig_0hhhh": 0,
+            "sig_mhmhh": 0,
+            "raw_sum": [0, 0, 0, 0, 0],
+            "raw_sq_sum": [0, 0, 0, 0, 0],
+            "delta_p2_p4_sum": 0,
+            "delta_p5_p2_sum": 0,
+        }
 
     def _advance_bin_if_needed(self, sample_us: int) -> None:
         if self.current_bin_started_us is None:
@@ -121,9 +170,15 @@ class FirmwareClassifier:
             current["sig_mhmhh"] = int(current["sig_mhmhh"]) + 1
 
         raw_sum = current["raw_sum"]
+        raw_sq_sum = current["raw_sq_sum"]
         assert isinstance(raw_sum, list)
+        assert isinstance(raw_sq_sum, list)
         for index, value in enumerate(values):
             raw_sum[index] += value
+            raw_sq_sum[index] += value * value
+
+        current["delta_p2_p4_sum"] = int(current["delta_p2_p4_sum"]) + values[1] - values[3]
+        current["delta_p5_p2_sum"] = int(current["delta_p5_p2_sum"]) + values[4] - values[1]
 
         if self.last_eval_us is None:
             self.last_eval_us = sample_us
@@ -138,12 +193,21 @@ class FirmwareClassifier:
 
         if fast["total"] == 0:
             self.fast_state_candidate = "unknown"
+            self.feature_state_candidate = "unknown"
+            self.previous_feature_candidate = "unknown"
+            self.feature_candidate_count = 0
             self.classified_state = "unknown"
             self.exposed_state = "unknown"
             return self.result()
 
         self.ratio_0hhhh = 100.0 * float(fast["sig_0hhhh"]) / float(fast["total"])
         self.ratio_mhmhh = 100.0 * float(fast["sig_mhmhh"]) / float(fast["total"])
+        self.p2_stddev = self._pin_stddev(fast, 1)
+        self.delta_p2_p4 = self._delta_mean(fast["delta_p2_p4_sum"], fast["total"])
+        self.delta_p5_p2 = self._delta_mean(fast["delta_p5_p2_sum"], fast["total"])
+        self.small_feature_score = self._small_feature_score(fast)
+        self.standby_feature_score = self._standby_feature_score(fast)
+
         standby_mhmhh = 0.0
         if standby["total"]:
             standby_mhmhh = 100.0 * float(standby["sig_mhmhh"]) / float(standby["total"])
@@ -155,33 +219,31 @@ class FirmwareClassifier:
             and bool(blink["valid"])
         )
 
+        feature_candidate = "unknown"
         if self.ratio_0hhhh >= LARGE_SIGNATURE_THRESHOLD:
-            self.fast_state_candidate = "running_large"
+            feature_candidate = "running_large"
         elif self.ratio_mhmhh >= MHMHH_SIGNATURE_THRESHOLD:
-            self.fast_state_candidate = "running_small"
-        else:
-            self.fast_state_candidate = "unknown"
+            small_match = self.small_feature_score >= FEATURE_SCORE_THRESHOLD
+            standby_match = self.standby_feature_score >= FEATURE_SCORE_THRESHOLD
+            if small_match and not standby_match:
+                feature_candidate = "running_small"
+            elif standby_match and not small_match:
+                feature_candidate = "standby"
+
+        self._update_fast_candidate(feature_candidate)
 
         if self.fast_state_candidate == "running_large":
             classified = "running_large"
             self.running_unknown_windows = 0
+        elif self.fast_state_candidate == "running_small":
+            classified = "running_small"
+            self.running_unknown_windows = 0
+        elif self.fast_state_candidate == "standby":
+            classified = "standby"
+            self.running_unknown_windows = 0
         elif self.standby_window_valid:
             classified = "standby"
             self.running_unknown_windows = 0
-        elif self.fast_state_candidate == "running_small":
-            unknown_with_mature_non_standby_window = (
-                self.exposed_state == "unknown"
-                and int(standby["bins"]) >= STANDBY_WINDOW_BINS
-                and not self.standby_window_valid
-            )
-            allow_small = self.exposed_state in {"running_large", "running_small"} or unknown_with_mature_non_standby_window
-            if allow_small:
-                classified = "running_small"
-                self.running_unknown_windows = 0
-            elif self.exposed_state == "standby" and int(standby["bins"]) < STANDBY_WINDOW_BINS:
-                classified = "standby"
-            else:
-                classified = "unknown"
         elif self.exposed_state in {"running_large", "running_small"}:
             self.running_unknown_windows = min(self.running_unknown_windows + 1, RUNNING_UNKNOWN_LIMIT)
             classified = "unknown" if self.running_unknown_windows >= RUNNING_UNKNOWN_LIMIT else self.exposed_state
@@ -200,14 +262,29 @@ class FirmwareClassifier:
             "state": self.exposed_state,
             "classifier": self.classified_state,
             "fast_candidate": self.fast_state_candidate,
+            "feature_candidate": self.feature_state_candidate,
             "ratio_0hhhh": self.ratio_0hhhh,
             "ratio_mhmhh": self.ratio_mhmhh,
+            "small_feature_score": self.small_feature_score,
+            "standby_feature_score": self.standby_feature_score,
+            "p2_stddev": self.p2_stddev,
+            "delta_p2_p4": self.delta_p2_p4,
+            "delta_p5_p2": self.delta_p5_p2,
             "blink": self.blink_score,
             "standby_window_valid": self.standby_window_valid,
         }
 
     def _window_stats(self, window_bins: int) -> dict[str, object]:
-        stats: dict[str, object] = {"bins": 0, "total": 0, "sig_0hhhh": 0, "sig_mhmhh": 0, "raw_sum": [0, 0, 0, 0, 0]}
+        stats: dict[str, object] = {
+            "bins": 0,
+            "total": 0,
+            "sig_0hhhh": 0,
+            "sig_mhmhh": 0,
+            "raw_sum": [0, 0, 0, 0, 0],
+            "raw_sq_sum": [0, 0, 0, 0, 0],
+            "delta_p2_p4_sum": 0,
+            "delta_p5_p2_sum": 0,
+        }
         for offset in range(min(window_bins, BIN_COUNT)):
             index = (self.current_bin + BIN_COUNT - offset) % BIN_COUNT
             bin_ = self.bins[index]
@@ -219,12 +296,77 @@ class FirmwareClassifier:
             stats["sig_0hhhh"] = int(stats["sig_0hhhh"]) + int(bin_["sig_0hhhh"])
             stats["sig_mhmhh"] = int(stats["sig_mhmhh"]) + int(bin_["sig_mhmhh"])
             stats_sum = stats["raw_sum"]
+            stats_sq_sum = stats["raw_sq_sum"]
             bin_sum = bin_["raw_sum"]
+            bin_sq_sum = bin_["raw_sq_sum"]
             assert isinstance(stats_sum, list)
+            assert isinstance(stats_sq_sum, list)
             assert isinstance(bin_sum, list)
+            assert isinstance(bin_sq_sum, list)
             for index, value in enumerate(bin_sum):
                 stats_sum[index] += value
+                stats_sq_sum[index] += bin_sq_sum[index]
+            stats["delta_p2_p4_sum"] = int(stats["delta_p2_p4_sum"]) + int(bin_["delta_p2_p4_sum"])
+            stats["delta_p5_p2_sum"] = int(stats["delta_p5_p2_sum"]) + int(bin_["delta_p5_p2_sum"])
         return stats
+
+    def _update_fast_candidate(self, feature_candidate: str) -> None:
+        self.feature_state_candidate = feature_candidate
+        if feature_candidate == "unknown":
+            self.previous_feature_candidate = "unknown"
+            self.feature_candidate_count = 0
+            self.fast_state_candidate = "unknown"
+            return
+
+        if feature_candidate == self.previous_feature_candidate:
+            self.feature_candidate_count = min(self.feature_candidate_count + 1, FEATURE_CONFIRM_COUNT)
+        else:
+            self.previous_feature_candidate = feature_candidate
+            self.feature_candidate_count = 1
+
+        self.fast_state_candidate = (
+            feature_candidate if self.feature_candidate_count >= FEATURE_CONFIRM_COUNT else "unknown"
+        )
+
+    def _small_feature_score(self, stats: dict[str, object]) -> int:
+        if int(stats["total"]) == 0:
+            return 0
+        return sum(
+            [
+                self._pin_stddev(stats, 1) <= SMALL_P2_STDDEV_MAX,
+                self._delta_mean(stats["delta_p2_p4_sum"], stats["total"]) >= SMALL_DELTA_P2_P4_MIN,
+                self._delta_mean(stats["delta_p5_p2_sum"], stats["total"]) <= SMALL_DELTA_P5_P2_MAX,
+            ]
+        )
+
+    def _standby_feature_score(self, stats: dict[str, object]) -> int:
+        if int(stats["total"]) == 0:
+            return 0
+        return sum(
+            [
+                self._pin_stddev(stats, 1) >= STANDBY_P2_STDDEV_MIN,
+                self._delta_mean(stats["delta_p2_p4_sum"], stats["total"]) <= STANDBY_DELTA_P2_P4_MAX,
+                self._delta_mean(stats["delta_p5_p2_sum"], stats["total"]) >= STANDBY_DELTA_P5_P2_MIN,
+            ]
+        )
+
+    def _pin_stddev(self, stats: dict[str, object], pin_index: int) -> float:
+        total = int(stats["total"])
+        if total == 0:
+            return 0.0
+        raw_sum = stats["raw_sum"]
+        raw_sq_sum = stats["raw_sq_sum"]
+        assert isinstance(raw_sum, list)
+        assert isinstance(raw_sq_sum, list)
+        mean = float(raw_sum[pin_index]) / float(total)
+        mean_sq = float(raw_sq_sum[pin_index]) / float(total)
+        return math.sqrt(max(0.0, mean_sq - mean * mean))
+
+    def _delta_mean(self, delta_sum: object, total: object) -> float:
+        total_int = int(total)
+        if total_int == 0:
+            return 0.0
+        return float(delta_sum) / float(total_int)
 
     def _standby_blink_stats(self, window_bins: int) -> dict[str, float | int | bool]:
         p1_means: list[float] = []
@@ -314,6 +456,26 @@ class PanelClassifierCaptureTest(unittest.TestCase):
         self.assertEqual(bucket(3996), "H")
         self.assertEqual(bucket(4095), "H")
 
+    def test_dma_fixture_feature_vote_separates_standby_and_small(self) -> None:
+        with DMA_FIXTURE.open(newline="") as fixture:
+            rows = list(csv.DictReader(fixture))
+
+        self.assertGreaterEqual(sum(1 for row in rows if row["label"] == "standby"), 60)
+        self.assertGreaterEqual(sum(1 for row in rows if row["label"] == "small"), 60)
+
+        for row in rows:
+            with self.subTest(label=row["label"], device_ms=row["device_ms"]):
+                self.assertGreaterEqual(float(row["ratio_mhmhh"]), MHMHH_SIGNATURE_THRESHOLD)
+                small_score, standby_score = feature_scores_from_summary(row)
+                if row["label"] == "standby":
+                    self.assertGreaterEqual(standby_score, FEATURE_SCORE_THRESHOLD, row)
+                    self.assertLess(small_score, FEATURE_SCORE_THRESHOLD, row)
+                elif row["label"] == "small":
+                    self.assertGreaterEqual(small_score, FEATURE_SCORE_THRESHOLD, row)
+                    self.assertLess(standby_score, FEATURE_SCORE_THRESHOLD, row)
+                else:
+                    self.fail(f"Unexpected fixture label: {row['label']}")
+
     def test_final_state_classification_from_raw_captures(self) -> None:
         archive_path = find_capture_archive()
         if archive_path is None:
@@ -338,7 +500,7 @@ class PanelClassifierCaptureTest(unittest.TestCase):
                     self.assertTrue(result["standby_window_valid"], result)
                     self.assertGreaterEqual(result["blink"], 40.0, result)
 
-    def test_standby_is_not_reported_as_small_before_slow_window(self) -> None:
+    def test_standby_uses_fast_feature_vote_before_slow_window(self) -> None:
         archive_path = find_capture_archive()
         if archive_path is None:
             self.skipTest(
@@ -349,9 +511,31 @@ class PanelClassifierCaptureTest(unittest.TestCase):
         classifier, rows = self.feed_capture(archive_path, member_name, max_seconds=8.0)
         self.assertGreater(rows, 1000)
         result = classifier.result()
-        self.assertEqual(result["fast_candidate"], "running_small", result)
+        self.assertEqual(result["feature_candidate"], "standby", result)
+        self.assertEqual(result["fast_candidate"], "standby", result)
         self.assertNotEqual(result["state"], "running_small", result)
         self.assertFalse(result["standby_window_valid"], result)
+        self.assertGreaterEqual(result["standby_feature_score"], FEATURE_SCORE_THRESHOLD, result)
+
+    def test_stable_states_are_classified_from_short_windows(self) -> None:
+        archive_path = find_capture_archive()
+        if archive_path is None:
+            self.skipTest(
+                "Set ICE_PANEL_CAPTURE_ARCHIVE or place ice_panel_sniffer-captures-*.tar.gz next to this repo"
+            )
+
+        expectations = {
+            "standby": "standby",
+            "large": "running_large",
+        }
+        for label, expected_state in expectations.items():
+            with self.subTest(label=label):
+                member_name, _ = CAPTURES[label]
+                classifier, rows = self.feed_capture(archive_path, member_name, max_seconds=3.0)
+                result = classifier.result()
+                self.assertGreater(rows, 1000)
+                self.assertEqual(result["state"], expected_state, result)
+                self.assertEqual(result["fast_candidate"], expected_state, result)
 
     def test_fast_candidate_uses_two_second_running_window(self) -> None:
         archive_path = find_capture_archive()

@@ -42,7 +42,7 @@ ESPHome 的 `project.name` 字段使用 `author_name.project_name` 形式，并�
   - `starting`
   - `stopping`
   - `unknown`
-- 提供调试实体：快速状态候选、ADC 签名、置信度、动作状态、P1-P5 原始读数等。
+- 提供调试实体：快速状态候选、特征评分、ADC 签名、置信度、动作状态、P1-P5 原始读数等。
 - 提供固件版本和 ESPHome 编译版本诊断实体，方便 OTA 后确认设备运行的固件。
 - 支持 ESPHome Native API、OTA、串口日志、Fallback AP 配网和 BLE Improv 配网。
 
@@ -50,7 +50,7 @@ ESPHome 的 `project.name` 字段使用 `author_name.project_name` 形式，并�
 
 制冰机原面板是 5 根线加若干 LED/按键的扫描电路。ESP32-C3 平时只把 P1-P5 作为高阻输入读取，通过 ADC 签名判断当前是待机、小冰运行还是大冰运行。
 
-状态识别使用两个窗口：2 秒快速窗口用于识别大冰/小冰运行，16 秒慢窗口用于确认待机电源灯慢闪。这样能更快跟随大小冰切换，同时避免把待机短窗口误判为小冰。
+状态识别使用 1 秒特征窗口和 16 秒待机兜底窗口。大冰主要由 `0HHHH` 签名识别；待机和小冰都会出现 `MHMHH`，因此固件会进一步比较 `P2` 波动、`P2-P4` 和 `P5-P2` 差分，并要求连续两次候选一致后再确认状态。16 秒慢窗口仍保留，用于在特征不明确时通过电源灯慢闪兜底确认待机。
 
 远程控制时，固件会短暂把对应 GPIO 切换为开漏低电平，模拟原面板按键：
 
@@ -237,12 +237,18 @@ sensor.chang_hong_ice_maker_esphome_esphome_version
 | `Classified State` | 仅由 ADC 签名和闪烁特征推导出的内部状态，可能是 `standby`、`running_small`、`running_large` 或 `unknown`。 |
 | `Confidence` | 当前内部识别结果的置信度，单位为百分比。数值越高，说明最近一段采样越像某个已知状态。 |
 | `ESPHome Version` | 当前设备运行时使用的 ESPHome 编译版本，用于 OTA 后核对固件环境。 |
-| `Fast State Candidate` | 2 秒快速窗口得到的运行状态候选值；`MHMHH` 在待机和小冰都会出现，因此它不一定会立刻成为对外状态。 |
-| `Fast Ratio 0HHHH` | 最近 2 秒窗口内，出现 `0HHHH` 签名的比例；该签名主要对应大冰运行。 |
-| `Fast Ratio MHMHH` | 最近 2 秒窗口内，出现 `MHMHH` 签名的比例；该签名对应小冰候选，也会出现在待机。 |
+| `Delta P2 P4` | 最近 1 秒窗口内 `P2-P4` 的平均差分，用于区分小冰和待机。 |
+| `Delta P5 P2` | 最近 1 秒窗口内 `P5-P2` 的平均差分，用于区分小冰和待机。 |
+| `Fast State Candidate` | 1 秒特征窗口经过连续确认后的快速状态候选值。 |
+| `Fast Ratio 0HHHH` | 最近 1 秒窗口内，出现 `0HHHH` 签名的比例；该签名主要对应大冰运行。 |
+| `Fast Ratio MHMHH` | 最近 1 秒窗口内，出现 `MHMHH` 签名的比例；该签名对应小冰和待机的共同候选。 |
+| `Feature State Candidate` | 最近 1 秒窗口直接得到的特征候选，尚未经过连续确认。 |
 | `Firmware Version` | 本项目固件版本，来自 YAML 里的 `project_version`。 |
 | `P1 Raw` - `P5 Raw` | `P1-P5` 的原始 ADC 读数，范围大致为 `0-4095`。直连 GPIO 且未共地时只能用于相对判断，不应换算成真实电压。 |
+| `P2 StdDev` | 最近 1 秒窗口内 `P2` 原始读数的标准差，是区分小冰和待机的主要特征之一。 |
+| `Small Feature Score` | 小冰特征投票得分，范围 `0-3`；达到 `2` 通常视为小冰候选。 |
 | `Standby Blink Score` | 电源灯慢闪特征评分；越高越像待机状态。 |
+| `Standby Feature Score` | 待机特征投票得分，范围 `0-3`；达到 `2` 通常视为待机候选。 |
 | `Standby Window Valid` | 16 秒慢窗口是否确认了待机慢闪。 |
 
 如果 `Classified State` 长期是 `unknown`，同时 `Confidence`、`Fast Ratio 0HHHH`、`Fast Ratio MHMHH` 和 `Standby Blink Score` 都很低，通常说明 `P1-P5` 接线、GPIO 映射或制冰机当前状态需要重新检查。
@@ -343,10 +349,16 @@ DEBUG level
 ```text
 state                 当前对外状态
 classifier            内部分类结果
-fast                  2 秒快速窗口状态候选
+fast                  1 秒特征窗口连续确认后的快速状态候选
+feature               1 秒特征窗口直接候选
 sig                   当前 ADC 签名
-fast_0HHHH            2 秒大冰运行签名占比
-fast_MHMHH            2 秒小冰/待机签名占比
+fast_0HHHH            1 秒大冰运行签名占比
+fast_MHMHH            1 秒小冰/待机签名占比
+small_score           小冰特征投票得分
+standby_score         待机特征投票得分
+p2_stddev             P2 标准差
+d_p2_p4               P2-P4 平均差分
+d_p5_p2               P5-P2 平均差分
 standby_valid         16 秒待机窗口是否有效
 blink                 待机慢闪评分
 action_state          当前动作状态

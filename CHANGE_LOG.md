@@ -1,5 +1,21 @@
 # Change Log
 
+## v0.2.1 - 2026-07-04
+
+### Changed
+
+- Improved standby vs small-ice classification with a 1-second feature-vote window using:
+  - `P2` standard deviation
+  - `P2-P4` average delta
+  - `P5-P2` average delta
+- Kept the 16-second standby blink detector as a fallback instead of relying on it for every standby/small distinction.
+- Changed `Fast State Candidate` to represent a short-window feature candidate after consecutive confirmation.
+
+### Added
+
+- Added diagnostic entities for `Feature State Candidate`, `Small Feature Score`, `Standby Feature Score`, `P2 StdDev`, `Delta P2 P4`, and `Delta P5 P2`.
+- Added a compact DMA debug fixture to classifier regression tests so CI can validate standby/small feature separation without the local sniffer archive.
+
 ## v0.2.0 - 2026-07-04
 
 ### Changed

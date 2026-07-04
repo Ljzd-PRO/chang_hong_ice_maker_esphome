@@ -18,6 +18,7 @@ WATCH_ENTITIES = [
     "sensor.chang_hong_ice_maker_esphome_state",
     "sensor.chang_hong_ice_maker_esphome_classified_state",
     "sensor.chang_hong_ice_maker_esphome_fast_state_candidate",
+    "sensor.chang_hong_ice_maker_esphome_feature_state_candidate",
     "sensor.chang_hong_ice_maker_esphome_action_state",
     "sensor.chang_hong_ice_maker_esphome_action_result",
     "binary_sensor.chang_hong_ice_maker_esphome_action_busy",
@@ -26,6 +27,11 @@ WATCH_ENTITIES = [
     "sensor.chang_hong_ice_maker_esphome_confidence",
     "sensor.chang_hong_ice_maker_esphome_fast_ratio_0hhhh",
     "sensor.chang_hong_ice_maker_esphome_fast_ratio_mhmhh",
+    "sensor.chang_hong_ice_maker_esphome_small_feature_score",
+    "sensor.chang_hong_ice_maker_esphome_standby_feature_score",
+    "sensor.chang_hong_ice_maker_esphome_p2_stddev",
+    "sensor.chang_hong_ice_maker_esphome_delta_p2_p4",
+    "sensor.chang_hong_ice_maker_esphome_delta_p5_p2",
     "sensor.chang_hong_ice_maker_esphome_standby_blink_score",
 ]
 

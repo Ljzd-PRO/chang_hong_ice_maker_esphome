@@ -42,7 +42,7 @@ ESPHome's `project.name` field follows the `author_name.project_name` convention
   - `starting`
   - `stopping`
   - `unknown`
-- Exposes debug entities such as fast state candidate, ADC signature, confidence, action state, and raw P1-P5 values.
+- Exposes debug entities such as fast state candidate, feature scores, ADC signature, confidence, action state, and raw P1-P5 values.
 - Exposes firmware and ESPHome build version diagnostic entities for OTA verification.
 - Supports ESPHome Native API, OTA, serial logs, Fallback AP provisioning, and BLE Improv provisioning.
 
@@ -50,7 +50,7 @@ ESPHome's `project.name` field follows the `author_name.project_name` convention
 
 The original ice-maker panel is a five-wire scanning circuit with LEDs and buttons. The ESP32-C3 normally keeps P1-P5 as high-impedance inputs and reads ADC signatures to infer whether the machine is in standby, small-ice mode, or large-ice mode.
 
-State detection uses two windows: a 2-second fast window for large/small running detection, and a 16-second slow window for standby power-LED blink confirmation. This makes ice-size changes faster while avoiding the common false positive where standby briefly looks like small-ice mode.
+State detection uses a 1-second feature window plus a 16-second standby fallback window. Large ice is mainly detected by the `0HHHH` signature. Standby and small ice both produce `MHMHH`, so the firmware also compares P2 variation, `P2-P4`, and `P5-P2` deltas, then requires two consecutive matching candidates before confirming the state. The 16-second slow window remains as a fallback for confirming standby from the blinking power LED when short-window features are ambiguous.
 
 For remote control, the firmware briefly switches one GPIO to open-drain low, simulating the original panel button:
 
@@ -237,12 +237,18 @@ These entities appear in the `Diagnostics` section of the Home Assistant device 
 | `Classified State` | Internal state inferred only from ADC signatures and blink behavior: `standby`, `running_small`, `running_large`, or `unknown`. |
 | `Confidence` | Confidence of the current internal classification, in percent. Higher values mean recent samples better match a known state. |
 | `ESPHome Version` | ESPHome build version running on the device, useful after OTA updates. |
-| `Fast State Candidate` | Running-state candidate from the 2-second fast window. `MHMHH` appears in both standby and small-ice mode, so this candidate is not always published as the exposed state immediately. |
-| `Fast Ratio 0HHHH` | Percentage of the recent 2-second window matching `0HHHH`, mainly associated with large-ice running. |
-| `Fast Ratio MHMHH` | Percentage of the recent 2-second window matching `MHMHH`, associated with small-ice candidate and also seen during standby. |
+| `Delta P2 P4` | Average `P2-P4` delta over the recent 1-second window, used to separate small ice from standby. |
+| `Delta P5 P2` | Average `P5-P2` delta over the recent 1-second window, used to separate small ice from standby. |
+| `Fast State Candidate` | Fast state candidate from the 1-second feature window after consecutive confirmation. |
+| `Fast Ratio 0HHHH` | Percentage of the recent 1-second window matching `0HHHH`, mainly associated with large-ice running. |
+| `Fast Ratio MHMHH` | Percentage of the recent 1-second window matching `MHMHH`, shared by small ice and standby. |
+| `Feature State Candidate` | Immediate candidate from the recent 1-second feature window before consecutive confirmation. |
 | `Firmware Version` | Project firmware version from `project_version` in YAML. |
 | `P1 Raw` - `P5 Raw` | Raw ADC readings for P1-P5, roughly `0-4095`. With direct floating GPIO wiring, these are only relative readings and must not be converted to real voltages. |
+| `P2 StdDev` | Standard deviation of P2 raw readings over the recent 1-second window; one of the main small/standby features. |
+| `Small Feature Score` | Small-ice feature vote score from `0-3`; `2` or more is normally treated as a small-ice candidate. |
 | `Standby Blink Score` | Score for the slow power-LED blink pattern. Higher values indicate a stronger standby signature. |
+| `Standby Feature Score` | Standby feature vote score from `0-3`; `2` or more is normally treated as a standby candidate. |
 | `Standby Window Valid` | Whether the 16-second slow window currently confirms standby blink behavior. |
 
 If `Classified State` stays `unknown` and `Confidence`, `Fast Ratio 0HHHH`, `Fast Ratio MHMHH`, and `Standby Blink Score` all remain low, check P1-P5 wiring, GPIO mapping, and the actual ice-maker state.
@@ -345,10 +351,16 @@ Common debug fields:
 ```text
 state                 exposed state
 classifier            internal classified state
-fast                  2-second fast-window state candidate
+fast                  fast state candidate after 1-second feature-window confirmation
+feature               immediate 1-second feature-window candidate
 sig                   current ADC signature
-fast_0HHHH            2-second large-ice signature ratio
-fast_MHMHH            2-second small/standby signature ratio
+fast_0HHHH            1-second large-ice signature ratio
+fast_MHMHH            1-second small/standby signature ratio
+small_score           small-ice feature vote score
+standby_score         standby feature vote score
+p2_stddev             P2 standard deviation
+d_p2_p4               P2-P4 average delta
+d_p5_p2               P5-P2 average delta
 standby_valid         whether the 16-second standby window is valid
 blink                 standby blink score
 action_state          current action state

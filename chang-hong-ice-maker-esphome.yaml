@@ -5,7 +5,7 @@
 substitutions:
   name: chang-hong-ice-maker-esphome
   friendly_name: Chang Hong Ice Maker ESPHome
-  project_version: "0.2.0"
+  project_version: "0.2.1"
 
 esphome:
   name: ${name}
@@ -229,6 +229,15 @@ text_sensor:
       return {id(chang_hong_ice_maker_esphome_core).fast_state_candidate_text()};
 
   - platform: template
+    id: chang_hong_ice_maker_esphome_feature_state_candidate
+    name: Feature State Candidate
+    icon: mdi:state-machine
+    entity_category: diagnostic
+    update_interval: 5s
+    lambda: |-
+      return {id(chang_hong_ice_maker_esphome_core).feature_state_candidate_text()};
+
+  - platform: template
     id: chang_hong_ice_maker_esphome_adc_signature
     name: ADC Signature
     icon: mdi:pulse
@@ -299,6 +308,56 @@ sensor:
     update_interval: 5s
     lambda: |-
       return id(chang_hong_ice_maker_esphome_core).ratio_mhmhh_signature();
+
+  - platform: template
+    id: chang_hong_ice_maker_esphome_small_feature_score
+    name: Small Feature Score
+    icon: mdi:counter
+    accuracy_decimals: 0
+    entity_category: diagnostic
+    update_interval: 5s
+    lambda: |-
+      return id(chang_hong_ice_maker_esphome_core).small_feature_score();
+
+  - platform: template
+    id: chang_hong_ice_maker_esphome_standby_feature_score
+    name: Standby Feature Score
+    icon: mdi:counter
+    accuracy_decimals: 0
+    entity_category: diagnostic
+    update_interval: 5s
+    lambda: |-
+      return id(chang_hong_ice_maker_esphome_core).standby_feature_score();
+
+  - platform: template
+    id: chang_hong_ice_maker_esphome_p2_stddev
+    name: P2 StdDev
+    icon: mdi:sigma
+    accuracy_decimals: 1
+    entity_category: diagnostic
+    update_interval: 5s
+    lambda: |-
+      return id(chang_hong_ice_maker_esphome_core).p2_stddev();
+
+  - platform: template
+    id: chang_hong_ice_maker_esphome_delta_p2_p4
+    name: Delta P2 P4
+    icon: mdi:delta
+    accuracy_decimals: 1
+    entity_category: diagnostic
+    update_interval: 5s
+    lambda: |-
+      return id(chang_hong_ice_maker_esphome_core).delta_p2_p4();
+
+  - platform: template
+    id: chang_hong_ice_maker_esphome_delta_p5_p2
+    name: Delta P5 P2
+    icon: mdi:delta
+    accuracy_decimals: 1
+    entity_category: diagnostic
+    update_interval: 5s
+    lambda: |-
+      return id(chang_hong_ice_maker_esphome_core).delta_p5_p2();
 
   - platform: template
     id: chang_hong_ice_maker_esphome_p1_raw
