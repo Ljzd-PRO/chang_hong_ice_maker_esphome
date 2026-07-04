@@ -352,11 +352,16 @@ sensor.chang_hong_ice_maker_esphome_esphome_version
 如果曾经用旧固件添加过同一块 ESP32-C3，Home Assistant 可能会保留旧 entity_id。此时可以在 HA 的实体设置中手动改名，或删除旧 ESPHome 设备后重新添加。
 
 <details>
-<summary>展开查看 Home Assistant 设备页面截图（旧版界面示例）</summary>
+<summary>展开查看 Home Assistant 控制与传感器截图</summary>
 
-当前版本主控件是 `Power` 与 `Large Ice` 两个开关；下图来自早期调试界面，若出现 `Mode` 字段，以本文实体列表为准。
+![Home Assistant 中的控制与传感器实体](docs/images/home-assistant-control-sensors.png)
 
-![Home Assistant 中的 Chang Hong Ice Maker ESPHome 设备页面](docs/images/home-assistant-device-page.png)
+</details>
+
+<details>
+<summary>展开查看 Home Assistant 诊断截图</summary>
+
+![Home Assistant 中的诊断实体](docs/images/home-assistant-diagnostics.png)
 
 </details>
 

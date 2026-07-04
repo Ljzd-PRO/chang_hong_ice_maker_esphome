@@ -256,11 +256,16 @@ If `Classified State` stays `unknown` and `Confidence`, `Fast Ratio 0HHHH`, `Fas
 If the same ESP32-C3 was added with older firmware, Home Assistant may keep old `entity_id` values. You can rename the entities manually or remove and re-add the ESPHome device.
 
 <details>
-<summary>View Home Assistant device page screenshot (older UI example)</summary>
+<summary>View Home Assistant controls and sensors screenshot</summary>
 
-The current firmware uses `Power` and `Large Ice` switches. The screenshot below was captured during earlier development; if it shows a `Mode` field, use the entity list in this README as the source of truth.
+![Home Assistant controls and sensor entities](docs/images/home-assistant-control-sensors.png)
 
-![Chang Hong Ice Maker ESPHome device page in Home Assistant](docs/images/home-assistant-device-page.png)
+</details>
+
+<details>
+<summary>View Home Assistant diagnostics screenshot</summary>
+
+![Home Assistant diagnostic entities](docs/images/home-assistant-diagnostics.png)
 
 </details>
 
