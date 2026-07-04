@@ -46,11 +46,105 @@ ESPHome 的 `project.name` 字段使用 `author_name.project_name` 形式，并�
 - 提供固件版本和 ESPHome 编译版本诊断实体，方便 OTA 后确认设备运行的固件。
 - 支持 ESPHome Native API、OTA、串口日志、Fallback AP 配网和 BLE Improv 配网。
 
-## 工作方式简述
+## 状态检测机制
 
-制冰机原面板是 5 根线加若干 LED/按键的扫描电路。ESP32-C3 平时只把 P1-P5 作为高阻输入读取，通过 ADC 签名判断当前是待机、小冰运行还是大冰运行。
+制冰机原面板是 5 根线加若干 LED/按键的扫描电路。ESP32-C3 平时只把 `P1-P5` 作为高阻输入读取，不主动驱动面板线；只有执行远程按键动作时，才会短暂把某个 GPIO 切换为开漏低电平。
 
-状态识别使用 1 秒特征窗口和 16 秒待机兜底窗口。大冰主要由 `0HHHH` 签名识别；待机和小冰都会出现 `MHMHH`，因此固件会进一步比较 `P2` 波动、`P2-P4` 和 `P5-P2` 差分，并要求连续两次候选一致后再确认状态。16 秒慢窗口仍保留，用于在特征不明确时通过电源灯慢闪兜底确认待机。
+Home Assistant 中最重要的是对外主状态：
+
+| 主状态 | `Power` | `Large Ice` | 含义 |
+| --- | --- | --- | --- |
+| `standby` | 关 | 开 | 制冰机通电待机。待机时 `Large Ice` 固定显示为开，因为机器每次从待机启动都会先进入大冰。 |
+| `running_large` | 开 | 开 | 制冰机运行，大冰模式。 |
+| `running_small` | 开 | 关 | 制冰机运行，小冰模式。 |
+| `starting` | 开 | 开 | 已发送开机命令，正在等待面板信号确认。 |
+| `stopping` | 关 | 开 | 已发送关机命令，正在等待面板信号确认。 |
+| `unknown` | 未知 | 未知 | 信号不足或当前状态不符合已知模式。 |
+
+### 采样与 ADC 签名
+
+固件以约 `1 kHz` 读取 `P1-P5` 的 ADC 原始值。由于当前方案没有把 ESP32-C3 GND 接到制冰机，ADC 原始值只作为相对特征使用，不代表真实电压。
+
+每个采样点会被分成 4 类：
+
+| 符号 | 条件 | 含义 |
+| --- | --- | --- |
+| `0` | ADC `< 100` | 低电平区域 |
+| `H` | ADC `> 3995` | 高电平区域 |
+| `M` | ADC `1500..2500` | 中间区域 |
+| `x` | 其它 | 不属于上述稳定区间 |
+
+5 个节点组合成一个 5 位签名，例如：
+
+```text
+P1 P2 P3 P4 P5
+0  H  H  H  H  -> 0HHHH
+M  H  M  H  H  -> MHMHH
+```
+
+当前固件主要使用两个签名：
+
+| 签名 | 主要含义 |
+| --- | --- |
+| `0HHHH` | 大冰运行的强特征。 |
+| `MHMHH` | 待机和小冰都会出现，需要继续用二级特征区分。 |
+
+### 快速窗口与特征投票
+
+固件把采样数据按 `500 ms` 分桶，并用最近 2 个桶组成 `1 秒快速窗口`。快速窗口每秒评估一次。
+
+快速窗口先计算签名比例：
+
+- `Fast Ratio 0HHHH >= 65%`：候选为 `running_large`。
+- `Fast Ratio MHMHH >= 55%`：进入待机/小冰二级判断。
+- 两者都不满足：候选为 `unknown`。
+
+待机和小冰都可能是 `MHMHH`，因此固件会继续计算 3 个二级特征：
+
+| 特征 | 小冰倾向 | 待机倾向 |
+| --- | --- | --- |
+| `P2 StdDev` | `<= 650` | `>= 700` |
+| `Delta P2 P4` | `>= -120` | `<= -145` |
+| `Delta P5 P2` | `<= 80` | `>= 120` |
+
+每满足一项得 1 分：
+
+- `Small Feature Score >= 2`：候选为 `running_small`。
+- `Standby Feature Score >= 2`：候选为 `standby`。
+- 两边都不足，或两边同时像：候选为 `unknown`。
+
+为了避免单个窗口毛刺导致状态跳变，快速候选需要连续 2 次一致才会成为 `Fast State Candidate`。
+
+### 慢速待机兜底
+
+待机状态下电源指示灯会慢闪。固件保留一个 `16 秒待机窗口`，用于检测慢闪特征：
+
+- 最近 16 秒内 `MHMHH` 比例足够高。
+- `P1` 均值有明显振幅。
+- 闪烁占空比处于待机灯常见范围。
+- 至少出现一次有效高低变化。
+
+满足这些条件时，`Standby Window Valid` 会变为开启，固件可把内部分类兜底纠正为 `standby`。
+
+这个慢窗口不是日常状态更新的唯一依据。正常情况下，小冰/待机主要由 1 秒特征投票区分；16 秒窗口主要用于信号不明确时兜底确认待机。
+
+### 状态机护栏
+
+固件不会把每一次内部候选都直接发布给 Home Assistant，而是再经过状态机约束。这样可以避免直连浮地 ADC 的短时波动影响用户看到的主状态。
+
+当前状态机规则：
+
+- `standby -> running_small` 不允许由被动检测直接发生。因为这台制冰机从待机启动必然先进入大冰。
+- `standby -> running_large` 允许，既可以来自 HA 开机命令，也可以来自用户手动按原面板开关键。
+- `running_large <-> running_small` 允许快速切换，但需要快速窗口确认。
+- 已确认运行时，短暂 `unknown` 不会立刻把主状态改成 `unknown`。
+- 已确认运行时，如果慢速待机窗口仍残留有效，但当前快速窗口仍有运行证据，主状态保持运行。
+- 已确认待机时，短窗口偶发 `running_small` 或 `unknown` 不会影响 `State`、`Power`、`Large Ice`。
+- 远程开机后的确认目标是 `running_large`，不是任意运行态。
+
+因此，诊断实体里的 `Feature State Candidate` 或 `Fast State Candidate` 可能短暂波动，但只要 `State`、`Power`、`Large Ice` 稳定，就表示主状态机工作正常。
+
+### 远程按键控制
 
 远程控制时，固件会短暂把对应 GPIO 切换为开漏低电平，模拟原面板按键：
 
@@ -234,15 +328,15 @@ sensor.chang_hong_ice_maker_esphome_esphome_version
 | `Action State` | 当前动作状态。常见值包括 `idle`、`pulse_sw1`、`pulse_sw2`、`pulse_uv`、`queued_uv_*`、`confirming_*`、`refused_*`、`timeout_*`。 |
 | `Action Result` | 最近一次动作结果或事件。刚启动时通常是 `boot`；成功确认时会出现 `confirmed_*`；被拒绝或超时时会出现 `refused_*`、`timeout_*`。 |
 | `ADC Signature` | 当前 5 个面板节点的相对 ADC 签名，例如 `0HHHH`、`MHMHH`。这里的 `0/H/M/x` 是低/高/中间/其它区间，不是实际电压。 |
-| `Classified State` | 仅由 ADC 签名和闪烁特征推导出的内部状态，可能是 `standby`、`running_small`、`running_large` 或 `unknown`。 |
+| `Classified State` | 固件内部分类状态，已经经过基础状态机护栏，但不包含 HA 命令执行期间的乐观显示。通常用于和 `State` 对照排查。 |
 | `Confidence` | 当前内部识别结果的置信度，单位为百分比。数值越高，说明最近一段采样越像某个已知状态。 |
 | `ESPHome Version` | 当前设备运行时使用的 ESPHome 编译版本，用于 OTA 后核对固件环境。 |
 | `Delta P2 P4` | 最近 1 秒窗口内 `P2-P4` 的平均差分，用于区分小冰和待机。 |
 | `Delta P5 P2` | 最近 1 秒窗口内 `P5-P2` 的平均差分，用于区分小冰和待机。 |
-| `Fast State Candidate` | 1 秒特征窗口经过连续确认后的快速状态候选值。 |
+| `Fast State Candidate` | 1 秒特征窗口经过连续确认后的快速状态候选值。它允许短暂波动，不等同于最终对外 `State`。 |
 | `Fast Ratio 0HHHH` | 最近 1 秒窗口内，出现 `0HHHH` 签名的比例；该签名主要对应大冰运行。 |
 | `Fast Ratio MHMHH` | 最近 1 秒窗口内，出现 `MHMHH` 签名的比例；该签名对应小冰和待机的共同候选。 |
-| `Feature State Candidate` | 最近 1 秒窗口直接得到的特征候选，尚未经过连续确认。 |
+| `Feature State Candidate` | 最近 1 秒窗口直接得到的特征候选，尚未经过连续确认，波动会比 `Fast State Candidate` 更明显。 |
 | `Firmware Version` | 本项目固件版本，来自 YAML 里的 `project_version`。 |
 | `P1 Raw` - `P5 Raw` | `P1-P5` 的原始 ADC 读数，范围大致为 `0-4095`。直连 GPIO 且未共地时只能用于相对判断，不应换算成真实电压。 |
 | `P2 StdDev` | 最近 1 秒窗口内 `P2` 原始读数的标准差，是区分小冰和待机的主要特征之一。 |
@@ -251,7 +345,9 @@ sensor.chang_hong_ice_maker_esphome_esphome_version
 | `Standby Feature Score` | 待机特征投票得分，范围 `0-3`；达到 `2` 通常视为待机候选。 |
 | `Standby Window Valid` | 16 秒慢窗口是否确认了待机慢闪。 |
 
-如果 `Classified State` 长期是 `unknown`，同时 `Confidence`、`Fast Ratio 0HHHH`、`Fast Ratio MHMHH` 和 `Standby Blink Score` 都很低，通常说明 `P1-P5` 接线、GPIO 映射或制冰机当前状态需要重新检查。
+如果 `Feature State Candidate` 或 `Fast State Candidate` 偶发 `unknown`、`running_small`、`standby` 跳动，但 `State`、`Power`、`Large Ice` 没有变化，通常不需要处理。这是直连浮地 ADC 信号的短窗口波动，固件会用状态机护栏过滤掉。
+
+如果 `State` 或 `Classified State` 长期是 `unknown`，同时 `Confidence`、`Fast Ratio 0HHHH`、`Fast Ratio MHMHH` 和 `Standby Blink Score` 都很低，通常说明 `P1-P5` 接线、GPIO 映射或制冰机当前状态需要重新检查。
 
 如果曾经用旧固件添加过同一块 ESP32-C3，Home Assistant 可能会保留旧 entity_id。此时可以在 HA 的实体设置中手动改名，或删除旧 ESPHome 设备后重新添加。
 
@@ -313,7 +409,7 @@ UV Toggle
 1. 制冰机断电，接好 P1-P5。
 2. ESP32-C3 上电并连接 Wi-Fi。
 3. 制冰机上电进入待机。
-4. 等待 20 秒左右，确认 `State` 变为 `standby`，`Power` 关闭，`Large Ice` 打开。
+4. 等待 5-20 秒左右，确认 `State` 变为 `standby`，`Power` 关闭，`Large Ice` 打开。
 5. 在 HA 中打开 `Power`，确认制冰机启动并进入大冰。
 6. 在运行状态切换 `Large Ice`，确认面板指示灯和 HA 状态一致。
 7. 关闭 `Power`，确认制冰机回到待机。
@@ -370,7 +466,7 @@ action_result         最近动作结果
 - 当前直连 GPIO 方案存在电气风险，ESP32-C3 GPIO 可能承受超过 3.3V 的面板电压。
 - 本项目不提供“缺水”和“冰满”的可靠 Home Assistant 状态实体。
 - UV 没有面板反馈，因此只提供按钮，不提供真实状态开关。
-- 待机和小冰运行的区分依赖电源灯慢闪特征；运行状态通常 2-5 秒内更新，待机确认通常需要约 16-25 秒。
+- 待机和小冰运行都可能出现 `MHMHH` 签名。固件会优先用 1 秒特征投票区分，并用 16 秒电源灯慢闪窗口兜底；诊断候选允许波动，但主状态应保持稳定。
 - 如果 Home Assistant 快速连续发送冲突命令，固件会拒绝部分命令，以保护原面板扫描逻辑。
 
 ## 附录：面板电路图与 PCB 走线图
