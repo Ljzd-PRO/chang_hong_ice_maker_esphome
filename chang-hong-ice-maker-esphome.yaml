@@ -5,7 +5,7 @@
 substitutions:
   name: chang-hong-ice-maker-esphome
   friendly_name: Chang Hong Ice Maker ESPHome
-  project_version: "0.2.1"
+  project_version: "0.2.2"
 
 esphome:
   name: ${name}

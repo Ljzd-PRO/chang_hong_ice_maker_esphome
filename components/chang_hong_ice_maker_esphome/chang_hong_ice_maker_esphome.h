@@ -98,7 +98,9 @@ class ChangHongIceMakerESPHome : public Component {
   static constexpr float STANDBY_DELTA_P5_P2_MIN = 120.0f;
   static constexpr uint8_t FEATURE_SCORE_THRESHOLD = 2;
   static constexpr uint8_t FEATURE_CONFIRM_COUNT = 2;
-  static constexpr uint8_t RUNNING_UNKNOWN_LIMIT = 2;
+  static constexpr uint8_t RUNNING_UNKNOWN_LIMIT = 8;
+  static constexpr uint8_t RUNNING_STANDBY_LIMIT = 8;
+  static constexpr uint8_t STANDBY_UNKNOWN_LIMIT = 8;
 
   enum class PulseKind : uint8_t {
     NONE = 0,
@@ -169,6 +171,7 @@ class ChangHongIceMakerESPHome : public Component {
   WindowStats calculate_window_stats_(uint8_t window_bins) const;
   BlinkStats calculate_standby_blink_stats_(uint8_t window_bins) const;
   void update_fast_candidate_(PanelState feature_candidate);
+  PanelState apply_transition_guard_(PanelState classified);
   uint8_t calculate_small_feature_score_(const WindowStats &stats) const;
   uint8_t calculate_standby_feature_score_(const WindowStats &stats) const;
   float calculate_pin_stddev_(const WindowStats &stats, uint8_t pin_index) const;
@@ -222,6 +225,8 @@ class ChangHongIceMakerESPHome : public Component {
   float standby_p1_duty_{0.0f};
   uint8_t standby_p1_transitions_{0};
   uint8_t running_unknown_windows_{0};
+  uint8_t running_standby_windows_{0};
+  uint8_t standby_unknown_windows_{0};
 
   bool pulse_active_{false};
   PulseKind pulse_kind_{PulseKind::NONE};

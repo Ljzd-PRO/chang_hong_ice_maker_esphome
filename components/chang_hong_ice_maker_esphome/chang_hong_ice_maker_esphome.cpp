@@ -705,16 +705,8 @@ void ChangHongIceMakerESPHome::evaluate_() {
     this->confidence_ = std::min(100.0f, (standby_mhmhh_ratio + this->blink_score_) * 0.5f);
     this->running_unknown_windows_ = 0;
   } else if (is_running_(this->exposed_state_) && !this->optimistic_active_()) {
-    if (this->running_unknown_windows_ < RUNNING_UNKNOWN_LIMIT) {
-      this->running_unknown_windows_++;
-    }
-    if (this->running_unknown_windows_ >= RUNNING_UNKNOWN_LIMIT) {
-      classified = PanelState::UNKNOWN;
-      this->confidence_ = std::max(this->ratio_large_signature_, this->ratio_mhmhh_signature_);
-    } else {
-      classified = this->exposed_state_;
-      this->confidence_ = std::max(this->ratio_large_signature_, this->ratio_mhmhh_signature_);
-    }
+    classified = PanelState::UNKNOWN;
+    this->confidence_ = std::max(this->ratio_large_signature_, this->ratio_mhmhh_signature_);
   } else if (this->exposed_state_ == PanelState::STANDBY && standby.bins < STANDBY_WINDOW_BINS) {
     classified = PanelState::STANDBY;
     this->confidence_ = std::max(this->ratio_mhmhh_signature_, this->standby_feature_score_ * 33.333f);
@@ -723,6 +715,7 @@ void ChangHongIceMakerESPHome::evaluate_() {
     this->confidence_ = std::max(this->ratio_large_signature_, this->ratio_mhmhh_signature_);
   }
 
+  classified = this->apply_transition_guard_(classified);
   this->classified_state_ = classified;
   this->update_exposed_state_(classified, millis());
 }
@@ -771,6 +764,84 @@ void ChangHongIceMakerESPHome::update_fast_candidate_(PanelState feature_candida
 
   this->fast_state_candidate_ =
       this->feature_candidate_count_ >= FEATURE_CONFIRM_COUNT ? feature_candidate : PanelState::UNKNOWN;
+}
+
+PanelState ChangHongIceMakerESPHome::apply_transition_guard_(PanelState classified) {
+  const bool small_target_pending =
+      ((this->optimistic_kind_ == OptimisticKind::SIZE || this->optimistic_kind_ == OptimisticKind::MODE) &&
+       this->optimistic_mode_ == PendingMode::SMALL) ||
+      this->pending_mode_after_power_on_ == PendingMode::SMALL;
+
+  const bool power_starting =
+      this->optimistic_active_() && this->optimistic_kind_ == OptimisticKind::POWER &&
+      this->optimistic_power_on_;
+
+  if (power_starting && classified == PanelState::RUNNING_SMALL && !small_target_pending) {
+    this->standby_unknown_windows_ = 0;
+    return PanelState::UNKNOWN;
+  }
+
+  if (is_running_(this->exposed_state_) && !this->optimistic_active_()) {
+    const bool running_evidence = this->fast_state_candidate_ == PanelState::RUNNING_LARGE ||
+                                  this->fast_state_candidate_ == PanelState::RUNNING_SMALL ||
+                                  this->feature_state_candidate_ == PanelState::RUNNING_LARGE ||
+                                  this->feature_state_candidate_ == PanelState::RUNNING_SMALL ||
+                                  this->ratio_large_signature_ >= LARGE_SIGNATURE_THRESHOLD ||
+                                  this->small_feature_score_ >= FEATURE_SCORE_THRESHOLD;
+
+    if (classified == PanelState::UNKNOWN) {
+      this->running_standby_windows_ = 0;
+      if (this->running_unknown_windows_ < RUNNING_UNKNOWN_LIMIT) {
+        this->running_unknown_windows_++;
+        return this->exposed_state_;
+      }
+    } else if (classified == PanelState::STANDBY) {
+      this->running_unknown_windows_ = 0;
+      if (running_evidence) {
+        this->running_standby_windows_ = 0;
+        return this->exposed_state_;
+      }
+      if (this->running_standby_windows_ < RUNNING_STANDBY_LIMIT) {
+        this->running_standby_windows_++;
+        return this->exposed_state_;
+      }
+    } else {
+      this->running_unknown_windows_ = 0;
+      this->running_standby_windows_ = 0;
+    }
+  }
+
+  if (this->exposed_state_ == PanelState::STANDBY && !this->optimistic_active_()) {
+    if (classified == PanelState::RUNNING_SMALL && !small_target_pending) {
+      this->standby_unknown_windows_ = 0;
+      return PanelState::STANDBY;
+    }
+
+    if (classified == PanelState::UNKNOWN) {
+      const bool standby_evidence = this->standby_window_valid_ ||
+                                    this->standby_feature_score_ >= 1.0f ||
+                                    this->blink_score_ >= 40.0f ||
+                                    this->ratio_mhmhh_signature_ >= MHMHH_SIGNATURE_THRESHOLD;
+      if (standby_evidence) {
+        this->standby_unknown_windows_ = 0;
+        return PanelState::STANDBY;
+      }
+
+      if (this->standby_unknown_windows_ < STANDBY_UNKNOWN_LIMIT) {
+        this->standby_unknown_windows_++;
+        return PanelState::STANDBY;
+      }
+    }
+  }
+
+  if (classified != PanelState::UNKNOWN) {
+    this->standby_unknown_windows_ = 0;
+    if (!is_running_(classified)) {
+      this->running_unknown_windows_ = 0;
+      this->running_standby_windows_ = 0;
+    }
+  }
+  return classified;
 }
 
 uint8_t ChangHongIceMakerESPHome::calculate_small_feature_score_(const WindowStats &stats) const {
@@ -836,7 +907,8 @@ void ChangHongIceMakerESPHome::update_exposed_state_(PanelState classified, uint
 
   bool confirmed = false;
   if (this->optimistic_kind_ == OptimisticKind::POWER) {
-    confirmed = this->optimistic_power_on_ ? is_running_(classified) : classified == PanelState::STANDBY;
+    confirmed = this->optimistic_power_on_ ? classified == PanelState::RUNNING_LARGE
+                                           : classified == PanelState::STANDBY;
   } else if (this->optimistic_kind_ == OptimisticKind::SIZE) {
     confirmed = this->optimistic_large_ice_ ? classified == PanelState::RUNNING_LARGE
                                             : classified == PanelState::RUNNING_SMALL;

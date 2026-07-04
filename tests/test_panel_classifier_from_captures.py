@@ -32,7 +32,9 @@ STANDBY_DELTA_P2_P4_MAX = -145.0
 STANDBY_DELTA_P5_P2_MIN = 120.0
 FEATURE_SCORE_THRESHOLD = 2
 FEATURE_CONFIRM_COUNT = 2
-RUNNING_UNKNOWN_LIMIT = 2
+RUNNING_UNKNOWN_LIMIT = 8
+RUNNING_STANDBY_LIMIT = 8
+STANDBY_UNKNOWN_LIMIT = 8
 
 
 CAPTURES = {
@@ -126,6 +128,7 @@ class FirmwareClassifier:
         self.exposed_state = "unknown"
         self.classified_state = "unknown"
         self.running_unknown_windows = 0
+        self.running_standby_windows = 0
         self.ratio_0hhhh = 0.0
         self.ratio_mhmhh = 0.0
         self.small_feature_score = 0
@@ -135,6 +138,7 @@ class FirmwareClassifier:
         self.delta_p5_p2 = 0.0
         self.blink_score = 0.0
         self.standby_window_valid = False
+        self.standby_unknown_windows = 0
 
     @staticmethod
     def _empty_bin() -> dict[str, object]:
@@ -196,8 +200,9 @@ class FirmwareClassifier:
             self.feature_state_candidate = "unknown"
             self.previous_feature_candidate = "unknown"
             self.feature_candidate_count = 0
-            self.classified_state = "unknown"
-            self.exposed_state = "unknown"
+            classified = self._apply_transition_guard("unknown")
+            self.classified_state = classified
+            self.exposed_state = classified
             return self.result()
 
         self.ratio_0hhhh = 100.0 * float(fast["sig_0hhhh"]) / float(fast["total"])
@@ -245,14 +250,14 @@ class FirmwareClassifier:
             classified = "standby"
             self.running_unknown_windows = 0
         elif self.exposed_state in {"running_large", "running_small"}:
-            self.running_unknown_windows = min(self.running_unknown_windows + 1, RUNNING_UNKNOWN_LIMIT)
-            classified = "unknown" if self.running_unknown_windows >= RUNNING_UNKNOWN_LIMIT else self.exposed_state
+            classified = "unknown"
         elif self.exposed_state == "standby" and int(standby["bins"]) < STANDBY_WINDOW_BINS:
             classified = "standby"
         else:
             self.running_unknown_windows = 0
             classified = "unknown"
 
+        classified = self._apply_transition_guard(classified)
         self.classified_state = classified
         self.exposed_state = classified
         return self.result()
@@ -327,6 +332,58 @@ class FirmwareClassifier:
         self.fast_state_candidate = (
             feature_candidate if self.feature_candidate_count >= FEATURE_CONFIRM_COUNT else "unknown"
         )
+
+    def _apply_transition_guard(self, classified: str) -> str:
+        if self.exposed_state in {"running_large", "running_small"}:
+            running_evidence = (
+                self.fast_state_candidate in {"running_large", "running_small"}
+                or self.feature_state_candidate in {"running_large", "running_small"}
+                or self.ratio_0hhhh >= LARGE_SIGNATURE_THRESHOLD
+                or self.small_feature_score >= FEATURE_SCORE_THRESHOLD
+            )
+
+            if classified == "unknown":
+                self.running_standby_windows = 0
+                if self.running_unknown_windows < RUNNING_UNKNOWN_LIMIT:
+                    self.running_unknown_windows += 1
+                    return self.exposed_state
+            elif classified == "standby":
+                self.running_unknown_windows = 0
+                if running_evidence:
+                    self.running_standby_windows = 0
+                    return self.exposed_state
+                if self.running_standby_windows < RUNNING_STANDBY_LIMIT:
+                    self.running_standby_windows += 1
+                    return self.exposed_state
+            else:
+                self.running_unknown_windows = 0
+                self.running_standby_windows = 0
+
+        if self.exposed_state == "standby":
+            if classified == "running_small":
+                self.standby_unknown_windows = 0
+                return "standby"
+
+            if classified == "unknown":
+                standby_evidence = (
+                    self.standby_window_valid
+                    or self.standby_feature_score >= 1
+                    or self.blink_score >= 40.0
+                    or self.ratio_mhmhh >= MHMHH_SIGNATURE_THRESHOLD
+                )
+                if standby_evidence:
+                    self.standby_unknown_windows = 0
+                    return "standby"
+                if self.standby_unknown_windows < STANDBY_UNKNOWN_LIMIT:
+                    self.standby_unknown_windows += 1
+                    return "standby"
+
+        if classified != "unknown":
+            self.standby_unknown_windows = 0
+            if classified not in {"running_large", "running_small"}:
+                self.running_unknown_windows = 0
+                self.running_standby_windows = 0
+        return classified
 
     def _small_feature_score(self, stats: dict[str, object]) -> int:
         if int(stats["total"]) == 0:
@@ -444,6 +501,36 @@ class PanelClassifierCaptureTest(unittest.TestCase):
         classifier.evaluate()
         return classifier, rows
 
+    def feed_synthetic(
+        self,
+        classifier: FirmwareClassifier,
+        start_us: int,
+        seconds: float,
+        values_fn,
+    ) -> int:
+        samples = int(seconds * 1000)
+        for offset in range(samples):
+            classifier.sample(start_us + offset * 1000, values_fn(offset))
+        classifier.evaluate()
+        return start_us + samples * 1000
+
+    @staticmethod
+    def synthetic_standby_sample(offset: int) -> tuple[int, int, int, int, int]:
+        p2 = 4095 if offset % 10 < 7 else 1500
+        return 1900, p2, 1900, 4095, 4095
+
+    @staticmethod
+    def synthetic_small_like_sample(offset: int) -> tuple[int, int, int, int, int]:
+        return 1900, 4095, 1900, 4095, 4095
+
+    @staticmethod
+    def synthetic_unknown_sample(offset: int) -> tuple[int, int, int, int, int]:
+        return 3000, 3000, 3000, 3000, 3000
+
+    @staticmethod
+    def synthetic_large_sample(offset: int) -> tuple[int, int, int, int, int]:
+        return 0, 4095, 4095, 4095, 4095
+
     def test_bucket_boundaries_match_firmware(self) -> None:
         self.assertEqual(bucket(0), "0")
         self.assertEqual(bucket(99), "0")
@@ -516,6 +603,59 @@ class PanelClassifierCaptureTest(unittest.TestCase):
         self.assertNotEqual(result["state"], "running_small", result)
         self.assertFalse(result["standby_window_valid"], result)
         self.assertGreaterEqual(result["standby_feature_score"], FEATURE_SCORE_THRESHOLD, result)
+
+    def test_standby_latch_blocks_small_like_short_window(self) -> None:
+        classifier = FirmwareClassifier()
+        t = self.feed_synthetic(classifier, 0, 3.0, self.synthetic_standby_sample)
+        self.assertEqual(classifier.result()["state"], "standby", classifier.result())
+
+        self.feed_synthetic(classifier, t, 3.0, self.synthetic_small_like_sample)
+        result = classifier.result()
+        self.assertEqual(result["feature_candidate"], "running_small", result)
+        self.assertEqual(result["fast_candidate"], "running_small", result)
+        self.assertEqual(result["classifier"], "standby", result)
+        self.assertEqual(result["state"], "standby", result)
+
+    def test_standby_latch_blocks_short_unknown_window(self) -> None:
+        classifier = FirmwareClassifier()
+        t = self.feed_synthetic(classifier, 0, 3.0, self.synthetic_standby_sample)
+        self.assertEqual(classifier.result()["state"], "standby", classifier.result())
+
+        self.feed_synthetic(classifier, t, 3.0, self.synthetic_unknown_sample)
+        result = classifier.result()
+        self.assertEqual(result["feature_candidate"], "unknown", result)
+        self.assertEqual(result["fast_candidate"], "unknown", result)
+        self.assertEqual(result["classifier"], "standby", result)
+        self.assertEqual(result["state"], "standby", result)
+
+    def test_running_latch_blocks_short_unknown_window(self) -> None:
+        classifier = FirmwareClassifier()
+        t = self.feed_synthetic(classifier, 0, 3.0, self.synthetic_large_sample)
+        self.assertEqual(classifier.result()["state"], "running_large", classifier.result())
+
+        self.feed_synthetic(classifier, t, 3.0, self.synthetic_unknown_sample)
+        result = classifier.result()
+        self.assertEqual(result["feature_candidate"], "unknown", result)
+        self.assertEqual(result["fast_candidate"], "unknown", result)
+        self.assertEqual(result["classifier"], "running_large", result)
+        self.assertEqual(result["state"], "running_large", result)
+
+    def test_running_latch_blocks_slow_standby_override_when_small_evidence_exists(self) -> None:
+        classifier = FirmwareClassifier()
+        t = self.feed_synthetic(classifier, 0, 3.0, self.synthetic_small_like_sample)
+        self.assertEqual(classifier.result()["state"], "running_small", classifier.result())
+
+        # A slow standby detector may still be valid briefly from stale data, but
+        # the current short window is clearly small-ice. Running state must win.
+        classifier.standby_window_valid = True
+        classified = classifier._apply_transition_guard("standby")
+        self.assertEqual(classified, "running_small", classifier.result())
+
+        self.feed_synthetic(classifier, t, 3.0, self.synthetic_small_like_sample)
+        result = classifier.result()
+        self.assertEqual(result["feature_candidate"], "running_small", result)
+        self.assertEqual(result["fast_candidate"], "running_small", result)
+        self.assertEqual(result["state"], "running_small", result)
 
     def test_stable_states_are_classified_from_short_windows(self) -> None:
         archive_path = find_capture_archive()

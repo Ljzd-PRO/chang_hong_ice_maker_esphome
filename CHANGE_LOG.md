@@ -1,5 +1,24 @@
 # Change Log
 
+## v0.2.2 - 2026-07-04
+
+### Changed
+
+- Added state-machine transition guards so standby cannot passively become Small Ice without an explicit command context.
+- Added running-state latches so transient `unknown` or stale slow standby evidence does not override confirmed Large Ice or Small Ice operation.
+- Changed power-on confirmation to require Large Ice, matching the physical machine behavior that startup from standby always enters Large Ice first.
+
+### Tests
+
+- Added synthetic regression tests for standby latch and running latch edge cases.
+- OTA-tested the firmware on the real machine through:
+  - 130s standby
+  - 130s Large Ice
+  - 130s Small Ice
+  - 130s Large Ice after switching back
+  - 130s standby after power off
+- All five real-machine stability windows completed with zero external `State`, `Power`, or `Large Ice` violations.
+
 ## v0.2.1 - 2026-07-04
 
 ### Changed
