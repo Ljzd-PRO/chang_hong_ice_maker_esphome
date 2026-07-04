@@ -12,15 +12,20 @@ import urllib.request
 
 
 WATCH_ENTITIES = [
-    "select.chang_hong_ice_maker_esphome_mode",
+    "switch.chang_hong_ice_maker_esphome_power",
+    "switch.chang_hong_ice_maker_esphome_large_ice",
     "button.chang_hong_ice_maker_esphome_uv_toggle",
     "sensor.chang_hong_ice_maker_esphome_state",
     "sensor.chang_hong_ice_maker_esphome_classified_state",
+    "sensor.chang_hong_ice_maker_esphome_fast_state_candidate",
     "sensor.chang_hong_ice_maker_esphome_action_state",
     "sensor.chang_hong_ice_maker_esphome_action_result",
     "binary_sensor.chang_hong_ice_maker_esphome_action_busy",
+    "binary_sensor.chang_hong_ice_maker_esphome_standby_window_valid",
     "sensor.chang_hong_ice_maker_esphome_adc_signature",
     "sensor.chang_hong_ice_maker_esphome_confidence",
+    "sensor.chang_hong_ice_maker_esphome_fast_ratio_0hhhh",
+    "sensor.chang_hong_ice_maker_esphome_fast_ratio_mhmhh",
     "sensor.chang_hong_ice_maker_esphome_standby_blink_score",
 ]
 
@@ -68,28 +73,30 @@ def snapshot(ha: HomeAssistant, label: str):
         print(f"  {entity} => {ha.state(entity)}")
 
 
+def set_switch(ha: HomeAssistant, entity_id: str, enabled: bool):
+    ha.call_service("switch", "turn_on" if enabled else "turn_off", {"entity_id": entity_id})
+
+
 def run_no_load(ha: HomeAssistant):
     snapshot(ha, "initial")
+    power = "switch.chang_hong_ice_maker_esphome_power"
+    large = "switch.chang_hong_ice_maker_esphome_large_ice"
     sequence = [
-        "Off",
-        "Small Ice",
-        "Large Ice",
-        "Small Ice",
-        "Large Ice",
-        "Off",
-        "Large Ice",
-        "Small Ice",
-        "Off",
-        "Large Ice",
+        (power, True),
+        (large, False),
+        (large, True),
+        (power, False),
+        (power, True),
+        (large, False),
+        (power, False),
+        (large, True),
+        (large, False),
+        (power, True),
     ]
-    for option in sequence:
-        ha.call_service(
-            "select",
-            "select_option",
-            {"entity_id": "select.chang_hong_ice_maker_esphome_mode", "option": option},
-        )
+    for entity_id, enabled in sequence:
+        set_switch(ha, entity_id, enabled)
         time.sleep(0.25)
-    snapshot(ha, "after rapid mode")
+    snapshot(ha, "after rapid switches")
 
     for _ in range(5):
         ha.call_service("button", "press", {"entity_id": "button.chang_hong_ice_maker_esphome_uv_toggle"})
@@ -97,12 +104,9 @@ def run_no_load(ha: HomeAssistant):
     snapshot(ha, "during uv spam")
 
     time.sleep(1.0)
-    ha.call_service(
-        "select",
-        "select_option",
-        {"entity_id": "select.chang_hong_ice_maker_esphome_mode", "option": "Large Ice"},
-    )
-    snapshot(ha, "mode during uv")
+    set_switch(ha, power, True)
+    set_switch(ha, large, False)
+    snapshot(ha, "switches during uv")
 
     time.sleep(7.0)
     snapshot(ha, "after uv cooldown")

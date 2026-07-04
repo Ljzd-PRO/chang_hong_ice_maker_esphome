@@ -13,6 +13,17 @@ import unittest
 
 BIN_COUNT = 64
 BIN_INTERVAL_US = 500_000
+FAST_WINDOW_BINS = 4
+STANDBY_WINDOW_BINS = 32
+EVALUATE_INTERVAL_US = 2_000_000
+
+LARGE_SIGNATURE_THRESHOLD = 65.0
+MHMHH_SIGNATURE_THRESHOLD = 55.0
+STANDBY_P1_MIN_AMPLITUDE = 150.0
+STANDBY_P1_MAX_AMPLITUDE = 800.0
+STANDBY_MIN_DUTY = 0.08
+STANDBY_MAX_DUTY = 0.55
+RUNNING_UNKNOWN_LIMIT = 2
 
 
 CAPTURES = {
@@ -34,7 +45,11 @@ def find_capture_archive() -> Path | None:
         return path if path.exists() else None
 
     candidates = sorted(Path("..").glob("ice_panel_sniffer-captures-*.tar.gz"))
-    return candidates[-1] if candidates else None
+    if candidates:
+        return candidates[-1]
+
+    local_archive = Path("/Users/ljzd/Documents/ice_panel_sniffer/captures/ice_panel_sniffer-captures-20260630-130202.tar.gz")
+    return local_archive if local_archive.exists() else None
 
 
 def parse_raw_adc_line(line: str) -> tuple[int, tuple[int, int, int, int, int]] | None:
@@ -69,7 +84,16 @@ class FirmwareClassifier:
         self.bins = [self._empty_bin() for _ in range(BIN_COUNT)]
         self.current_bin = 0
         self.current_bin_started_us: int | None = None
+        self.last_eval_us: int | None = None
         self.last_signature = "xxxxx"
+        self.fast_state_candidate = "unknown"
+        self.exposed_state = "unknown"
+        self.classified_state = "unknown"
+        self.running_unknown_windows = 0
+        self.ratio_0hhhh = 0.0
+        self.ratio_mhmhh = 0.0
+        self.blink_score = 0.0
+        self.standby_window_valid = False
 
     @staticmethod
     def _empty_bin() -> dict[str, object]:
@@ -101,35 +125,113 @@ class FirmwareClassifier:
         for index, value in enumerate(values):
             raw_sum[index] += value
 
-    def evaluate(self) -> dict[str, float | str]:
-        total = sum(int(bin_["total"]) for bin_ in self.bins)
-        if total == 0:
-            return {"state": "unknown", "ratio_0hhhh": 0.0, "ratio_mhmhh": 0.0, "blink": 0.0}
+        if self.last_eval_us is None:
+            self.last_eval_us = sample_us
+        if sample_us - self.last_eval_us >= EVALUATE_INTERVAL_US:
+            self.last_eval_us = sample_us
+            self.evaluate()
 
-        sig_large = sum(int(bin_["sig_0hhhh"]) for bin_ in self.bins)
-        sig_mhmhh = sum(int(bin_["sig_mhmhh"]) for bin_ in self.bins)
-        ratio_large = 100.0 * sig_large / total
-        ratio_mhmhh = 100.0 * sig_mhmhh / total
-        blink = self._blink_score()
+    def evaluate(self) -> dict[str, float | str | bool]:
+        fast = self._window_stats(FAST_WINDOW_BINS)
+        standby = self._window_stats(STANDBY_WINDOW_BINS)
+        blink = self._standby_blink_stats(STANDBY_WINDOW_BINS)
 
-        if ratio_large > 65.0 and blink < 60.0:
-            state = "running_large"
-        elif ratio_mhmhh > 55.0:
-            state = "standby" if blink >= 60.0 else "running_small"
+        if fast["total"] == 0:
+            self.fast_state_candidate = "unknown"
+            self.classified_state = "unknown"
+            self.exposed_state = "unknown"
+            return self.result()
+
+        self.ratio_0hhhh = 100.0 * float(fast["sig_0hhhh"]) / float(fast["total"])
+        self.ratio_mhmhh = 100.0 * float(fast["sig_mhmhh"]) / float(fast["total"])
+        standby_mhmhh = 0.0
+        if standby["total"]:
+            standby_mhmhh = 100.0 * float(standby["sig_mhmhh"]) / float(standby["total"])
+
+        self.blink_score = float(blink["score"])
+        self.standby_window_valid = (
+            int(standby["bins"]) >= STANDBY_WINDOW_BINS
+            and standby_mhmhh >= MHMHH_SIGNATURE_THRESHOLD
+            and bool(blink["valid"])
+        )
+
+        if self.ratio_0hhhh >= LARGE_SIGNATURE_THRESHOLD:
+            self.fast_state_candidate = "running_large"
+        elif self.ratio_mhmhh >= MHMHH_SIGNATURE_THRESHOLD:
+            self.fast_state_candidate = "running_small"
         else:
-            state = "unknown"
+            self.fast_state_candidate = "unknown"
 
+        if self.fast_state_candidate == "running_large":
+            classified = "running_large"
+            self.running_unknown_windows = 0
+        elif self.standby_window_valid:
+            classified = "standby"
+            self.running_unknown_windows = 0
+        elif self.fast_state_candidate == "running_small":
+            unknown_with_mature_non_standby_window = (
+                self.exposed_state == "unknown"
+                and int(standby["bins"]) >= STANDBY_WINDOW_BINS
+                and not self.standby_window_valid
+            )
+            allow_small = self.exposed_state in {"running_large", "running_small"} or unknown_with_mature_non_standby_window
+            if allow_small:
+                classified = "running_small"
+                self.running_unknown_windows = 0
+            elif self.exposed_state == "standby" and int(standby["bins"]) < STANDBY_WINDOW_BINS:
+                classified = "standby"
+            else:
+                classified = "unknown"
+        elif self.exposed_state in {"running_large", "running_small"}:
+            self.running_unknown_windows = min(self.running_unknown_windows + 1, RUNNING_UNKNOWN_LIMIT)
+            classified = "unknown" if self.running_unknown_windows >= RUNNING_UNKNOWN_LIMIT else self.exposed_state
+        elif self.exposed_state == "standby" and int(standby["bins"]) < STANDBY_WINDOW_BINS:
+            classified = "standby"
+        else:
+            self.running_unknown_windows = 0
+            classified = "unknown"
+
+        self.classified_state = classified
+        self.exposed_state = classified
+        return self.result()
+
+    def result(self) -> dict[str, float | str | bool]:
         return {
-            "state": state,
-            "ratio_0hhhh": ratio_large,
-            "ratio_mhmhh": ratio_mhmhh,
-            "blink": blink,
+            "state": self.exposed_state,
+            "classifier": self.classified_state,
+            "fast_candidate": self.fast_state_candidate,
+            "ratio_0hhhh": self.ratio_0hhhh,
+            "ratio_mhmhh": self.ratio_mhmhh,
+            "blink": self.blink_score,
+            "standby_window_valid": self.standby_window_valid,
         }
 
-    def _blink_score(self) -> float:
+    def _window_stats(self, window_bins: int) -> dict[str, object]:
+        stats: dict[str, object] = {"bins": 0, "total": 0, "sig_0hhhh": 0, "sig_mhmhh": 0, "raw_sum": [0, 0, 0, 0, 0]}
+        for offset in range(min(window_bins, BIN_COUNT)):
+            index = (self.current_bin + BIN_COUNT - offset) % BIN_COUNT
+            bin_ = self.bins[index]
+            total = int(bin_["total"])
+            if total == 0:
+                continue
+            stats["bins"] = int(stats["bins"]) + 1
+            stats["total"] = int(stats["total"]) + total
+            stats["sig_0hhhh"] = int(stats["sig_0hhhh"]) + int(bin_["sig_0hhhh"])
+            stats["sig_mhmhh"] = int(stats["sig_mhmhh"]) + int(bin_["sig_mhmhh"])
+            stats_sum = stats["raw_sum"]
+            bin_sum = bin_["raw_sum"]
+            assert isinstance(stats_sum, list)
+            assert isinstance(bin_sum, list)
+            for index, value in enumerate(bin_sum):
+                stats_sum[index] += value
+        return stats
+
+    def _standby_blink_stats(self, window_bins: int) -> dict[str, float | int | bool]:
         p1_means: list[float] = []
-        for offset in range(BIN_COUNT):
-            index = (self.current_bin + 1 + offset) % BIN_COUNT
+        capped = min(window_bins, BIN_COUNT)
+        for reverse_offset in range(capped, 0, -1):
+            offset = reverse_offset - 1
+            index = (self.current_bin + BIN_COUNT - offset) % BIN_COUNT
             bin_ = self.bins[index]
             total = int(bin_["total"])
             if total == 0:
@@ -138,43 +240,49 @@ class FirmwareClassifier:
             assert isinstance(raw_sum, list)
             p1_means.append(float(raw_sum[0]) / float(total))
 
-        if len(p1_means) < 16:
-            return 0.0
+        if len(p1_means) < capped:
+            return {"valid": False, "score": 0.0, "amplitude": 0.0, "duty": 0.0, "transitions": 0}
 
         min_value = min(p1_means)
         max_value = max(p1_means)
         amplitude = max_value - min_value
-        if amplitude < 150.0:
-            return 0.0
-
         threshold = min_value + amplitude * 0.5
         high_states = [value >= threshold for value in p1_means]
         high_count = sum(high_states)
         transitions = sum(
             1 for previous, current in zip(high_states, high_states[1:]) if previous != current
         )
+        duty = float(high_count) / float(len(high_states))
 
-        duration_s = len(p1_means) * 0.5
-        expected_transitions = max(2.0, duration_s / 2.0)
-        transition_error = abs(float(transitions) - expected_transitions) / expected_transitions
-        transition_score = max(0.0, 1.0 - transition_error)
-        amplitude_score = min(1.0, (amplitude - 150.0) / 100.0)
+        valid = (
+            STANDBY_P1_MIN_AMPLITUDE <= amplitude <= STANDBY_P1_MAX_AMPLITUDE
+            and STANDBY_MIN_DUTY <= duty <= STANDBY_MAX_DUTY
+            and transitions >= 1
+        )
 
-        duty = float(high_count) / float(len(p1_means))
-        if 0.12 <= duty <= 0.48:
+        amplitude_score = 0.0 if amplitude <= STANDBY_P1_MIN_AMPLITUDE else min(1.0, (amplitude - STANDBY_P1_MIN_AMPLITUDE) / 100.0)
+        transition_score = min(1.0, float(transitions) / 2.0)
+        if STANDBY_MIN_DUTY <= duty <= STANDBY_MAX_DUTY:
             duty_score = 1.0
-        elif duty < 0.12:
-            duty_score = max(0.0, duty / 0.12)
+        elif duty < STANDBY_MIN_DUTY:
+            duty_score = max(0.0, duty / STANDBY_MIN_DUTY)
         else:
-            duty_score = max(0.0, (0.70 - duty) / 0.22)
+            duty_score = max(0.0, (0.70 - duty) / (0.70 - STANDBY_MAX_DUTY))
 
-        return 100.0 * amplitude_score * transition_score * duty_score
+        return {
+            "valid": valid,
+            "score": 100.0 * amplitude_score * transition_score * duty_score,
+            "amplitude": amplitude,
+            "duty": duty,
+            "transitions": transitions,
+        }
 
 
 class PanelClassifierCaptureTest(unittest.TestCase):
-    def classify_capture(self, archive_path: Path, member_name: str) -> dict[str, float | str]:
+    def feed_capture(self, archive_path: Path, member_name: str, max_seconds: float | None = None) -> tuple[FirmwareClassifier, int]:
         classifier = FirmwareClassifier()
         rows = 0
+        first_us: int | None = None
         with tarfile.open(archive_path, "r:gz") as archive:
             with archive.extractfile(member_name) as raw_file:
                 self.assertIsNotNone(raw_file, member_name)
@@ -184,13 +292,15 @@ class PanelClassifierCaptureTest(unittest.TestCase):
                     if parsed is None:
                         continue
                     sample_us, values = parsed
+                    if first_us is None:
+                        first_us = sample_us
+                    if max_seconds is not None and sample_us - first_us > max_seconds * 1_000_000:
+                        break
                     classifier.sample(sample_us, values)
                     rows += 1
 
-        self.assertGreater(rows, 10_000, member_name)
-        result = classifier.evaluate()
-        result["rows"] = rows
-        return result
+        classifier.evaluate()
+        return classifier, rows
 
     def test_bucket_boundaries_match_firmware(self) -> None:
         self.assertEqual(bucket(0), "0")
@@ -213,18 +323,55 @@ class PanelClassifierCaptureTest(unittest.TestCase):
 
         for label, (member_name, expected_state) in CAPTURES.items():
             with self.subTest(label=label):
-                result = self.classify_capture(archive_path, member_name)
+                classifier, rows = self.feed_capture(archive_path, member_name)
+                result = classifier.result()
+                self.assertGreater(rows, 10_000, member_name)
                 self.assertEqual(result["state"], expected_state, result)
 
                 if expected_state == "running_large":
-                    self.assertGreater(result["ratio_0hhhh"], 65.0, result)
-                    self.assertLess(result["blink"], 60.0, result)
+                    self.assertEqual(result["fast_candidate"], "running_large", result)
+                    self.assertGreaterEqual(result["ratio_0hhhh"], LARGE_SIGNATURE_THRESHOLD, result)
                 elif expected_state == "running_small":
-                    self.assertGreater(result["ratio_mhmhh"], 55.0, result)
-                    self.assertLess(result["blink"], 60.0, result)
+                    self.assertEqual(result["fast_candidate"], "running_small", result)
+                    self.assertGreaterEqual(result["ratio_mhmhh"], MHMHH_SIGNATURE_THRESHOLD, result)
                 elif expected_state == "standby":
-                    self.assertGreater(result["ratio_mhmhh"], 55.0, result)
-                    self.assertGreaterEqual(result["blink"], 60.0, result)
+                    self.assertTrue(result["standby_window_valid"], result)
+                    self.assertGreaterEqual(result["blink"], 40.0, result)
+
+    def test_standby_is_not_reported_as_small_before_slow_window(self) -> None:
+        archive_path = find_capture_archive()
+        if archive_path is None:
+            self.skipTest(
+                "Set ICE_PANEL_CAPTURE_ARCHIVE or place ice_panel_sniffer-captures-*.tar.gz next to this repo"
+            )
+
+        member_name, _ = CAPTURES["standby"]
+        classifier, rows = self.feed_capture(archive_path, member_name, max_seconds=8.0)
+        self.assertGreater(rows, 1000)
+        result = classifier.result()
+        self.assertEqual(result["fast_candidate"], "running_small", result)
+        self.assertNotEqual(result["state"], "running_small", result)
+        self.assertFalse(result["standby_window_valid"], result)
+
+    def test_fast_candidate_uses_two_second_running_window(self) -> None:
+        archive_path = find_capture_archive()
+        if archive_path is None:
+            self.skipTest(
+                "Set ICE_PANEL_CAPTURE_ARCHIVE or place ice_panel_sniffer-captures-*.tar.gz next to this repo"
+            )
+
+        expectations = {
+            "large": "running_large",
+            "large_to_small": "running_small",
+            "small_to_large": "running_large",
+            "sim_large_to_small": "running_small",
+            "sim_small_to_large": "running_large",
+        }
+        for label, expected_candidate in expectations.items():
+            with self.subTest(label=label):
+                member_name, _ = CAPTURES[label]
+                classifier, _ = self.feed_capture(archive_path, member_name)
+                self.assertEqual(classifier.result()["fast_candidate"], expected_candidate, classifier.result())
 
 
 if __name__ == "__main__":
