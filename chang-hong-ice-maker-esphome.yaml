@@ -5,13 +5,14 @@
 substitutions:
   name: chang-hong-ice-maker-esphome
   friendly_name: Chang Hong Ice Maker ESPHome
-  project_version: "0.2.2"
+  project_version: "0.2.3"
+  target_model: "CH-Z6Y3"
 
 esphome:
   name: ${name}
   friendly_name: ${friendly_name}
   comment: >-
-    ESP32-C3 direct GPIO bridge for the five-wire ice-maker panel.
+    ESP32-C3 direct GPIO bridge for the five-wire Chang Hong CH-Z6Y3 ice-maker panel.
     Author: Ljzd-PRO <me@ljzd.link> https://github.com/Ljzd-PRO
   project:
     name: "ljzd-pro.chang_hong_ice_maker_esphome"
@@ -193,6 +194,15 @@ text_sensor:
     update_interval: 60s
     lambda: |-
       return {"${project_version}"};
+
+  - platform: template
+    id: chang_hong_ice_maker_esphome_target_model
+    name: Target Model
+    icon: mdi:label-outline
+    entity_category: diagnostic
+    update_interval: 60s
+    lambda: |-
+      return {"${target_model}"};
 
   - platform: version
     id: chang_hong_ice_maker_esphome_esphome_version

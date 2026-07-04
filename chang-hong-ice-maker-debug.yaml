@@ -5,13 +5,14 @@
 substitutions:
   name: chang-hong-ice-maker-debug
   friendly_name: Chang Hong Ice Maker Debug
-  project_version: "0.2.0-debug"
+  project_version: "0.2.1-debug"
+  target_model: "CH-Z6Y3"
 
 esphome:
   name: ${name}
   friendly_name: ${friendly_name}
   comment: >-
-    Passive diagnostic firmware for the five-wire Chang Hong ice-maker panel.
+    Passive diagnostic firmware for the five-wire Chang Hong CH-Z6Y3 ice-maker panel.
     Author: Ljzd-PRO <me@ljzd.link> https://github.com/Ljzd-PRO
   project:
     name: "ljzd-pro.chang_hong_ice_maker_esphome_debug"
@@ -102,6 +103,15 @@ text_sensor:
     update_interval: 60s
     lambda: |-
       return {"${project_version}"};
+
+  - platform: template
+    id: debug_target_model
+    name: Target Model
+    icon: mdi:label-outline
+    entity_category: diagnostic
+    update_interval: 60s
+    lambda: |-
+      return {"${target_model}"};
 
   - platform: version
     id: debug_esphome_version

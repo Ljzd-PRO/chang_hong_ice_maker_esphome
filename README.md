@@ -6,13 +6,24 @@
 
 语言：中文 | [English](README.en.md)
 
-这是一个用于把长虹制冰机接入 Home Assistant 的 ESPHome 固件项目。硬件基于 ESP32-C3，接入制冰机原控制面板的 5 根信号线，实现远程查看工作状态、切换开关机/大小冰、触发 UV 杀菌按键。
+这是一个用于把长虹 `CH-Z6Y3` 制冰机接入 Home Assistant 的 ESPHome 固件项目。硬件基于 ESP32-C3，接入制冰机原控制面板的 5 根信号线，实现远程查看工作状态、切换开关机/大小冰、触发 UV 杀菌按键。
 
-本项目使用已经实测可行的直连 GPIO 方案。它适合当前这台机器的改造和调试，但不是通用安全接口方案；正式长期使用时，建议给每根信号线增加限流、电平钳位或隔离前端。
+本项目使用已经在 `CH-Z6Y3` 上实测可行的直连 GPIO 方案。它适合已验证机型的改造和调试，但不是通用安全接口方案；正式长期使用时，建议给每根信号线增加限流、电平钳位或隔离前端。
 
 ## 相关仓库
 
 本仓库专注于 ESPHome / Home Assistant 固件实现。五线面板的电气技术细节、逆向采集过程、固定网表、原理图和 PCB 走线图参考：[ice_panel_sniffer](https://github.com/Ljzd-PRO/ice_panel_sniffer)。
+
+## 适配机型
+
+| 项目 | 说明 |
+| --- | --- |
+| 已验证机型 | 长虹 `CH-Z6Y3` |
+| 面板形式 | 原机 5 线 `P1-P5` 控制面板 |
+| 面板特征 | `缺水`、`冰满`、`电源`、`小冰`、`大冰` 5 个指示灯，以及 `开关`、`选择` 两个按键 |
+| 面板网表 | 与 [ice_panel_sniffer](https://github.com/Ljzd-PRO/ice_panel_sniffer) 中记录的 5 线网表一致 |
+
+其它长虹型号即使外观相似，也应先核对 `P1-P5` 网表、LED/按键支路、启动后默认进入大冰的行为，以及待机/小冰/大冰 ADC 签名，再复用本固件。
 
 ## 作者与项目信息
 
@@ -42,8 +53,8 @@ ESPHome 的 `project.name` 字段使用 `author_name.project_name` 形式，并�
   - `starting`
   - `stopping`
   - `unknown`
-- 提供 Home Assistant 诊断实体：动作状态、快速状态候选、特征评分、ADC 签名、置信度、P1-P5 原始读数等。
-- 提供固件版本和 ESPHome 编译版本诊断实体，方便 OTA 后确认设备运行的固件。
+- 提供 Home Assistant 诊断实体：适配型号、动作状态、快速状态候选、特征评分、ADC 签名、置信度、P1-P5 原始读数等。
+- 提供适配型号、固件版本和 ESPHome 编译版本诊断实体，方便 OTA 后确认设备运行的固件。
 - 支持 ESPHome Native API、OTA、串口日志、Fallback AP 配网和 BLE Improv 配网。
 
 ## 状态检测机制
@@ -342,8 +353,9 @@ sensor.chang_hong_ice_maker_esphome_state
 | `Standby Blink Score` | 慢窗口兜底 | 电源灯慢闪特征评分；越高越像待机状态。 |
 | `Standby Window Valid` | 慢窗口兜底 | 16 秒慢窗口是否确认了待机慢闪。开启时，待机判定通常更可靠。 |
 | `P1 Raw` - `P5 Raw` | 原始采样 | `P1-P5` 的原始 ADC 读数，范围大致为 `0-4095`。直连 GPIO 且未共地时只能用于相对判断，不应换算成真实电压。 |
-| `Firmware Version` | 版本信息 | 本项目固件版本，来自 YAML 里的 `project_version`。 |
-| `ESPHome Version` | 版本信息 | 当前设备运行时使用的 ESPHome 编译版本，用于 OTA 后核对固件环境。 |
+| `Target Model` | 机型与版本 | 当前固件声明的已验证适配机型，主固件应显示 `CH-Z6Y3`。 |
+| `Firmware Version` | 机型与版本 | 本项目固件版本，来自 YAML 里的 `project_version`。 |
+| `ESPHome Version` | 机型与版本 | 当前设备运行时使用的 ESPHome 编译版本，用于 OTA 后核对固件环境。 |
 
 如果 `Feature State Candidate` 或 `Fast State Candidate` 偶发 `unknown`、`running_small`、`standby` 跳动，但 `State`、`Power`、`Large Ice` 没有变化，通常不需要处理。这是直连浮地 ADC 信号的短窗口波动，固件会用状态机护栏过滤掉。
 
@@ -470,6 +482,7 @@ action_result         最近动作结果
 
 ## 限制
 
+- 本固件的接线、阈值和状态机规则来自长虹 `CH-Z6Y3` 实测；其它型号需要重新验证面板网表和状态签名。
 - 当前直连 GPIO 方案存在电气风险，ESP32-C3 GPIO 可能承受超过 3.3V 的面板电压。
 - 本项目不提供“缺水”和“冰满”的可靠 Home Assistant 状态实体。
 - UV 没有面板反馈，因此只提供按钮，不提供真实状态开关；连续点击会排队执行翻转动作，但固件无法知道最终 UV 真实状态。

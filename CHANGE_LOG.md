@@ -1,5 +1,16 @@
 # Change Log
 
+## v0.2.3 - 2026-07-05
+
+### Added
+
+- Documented Chang Hong `CH-Z6Y3` as the confirmed supported ice-maker model.
+- Added `Target Model` diagnostic text sensors to the main and debug firmware.
+
+### Changed
+
+- Updated firmware comments and README compatibility guidance to name the verified `CH-Z6Y3` target without changing node name, project id, component name, or existing Home Assistant entity IDs.
+
 ## v0.2.2 - 2026-07-04
 
 ### Changed

@@ -6,13 +6,24 @@
 
 Language: [中文](README.md) | English
 
-This is an ESPHome firmware project for integrating a Chang Hong ice maker into Home Assistant. It uses an ESP32-C3 connected to the original five-wire control panel, enabling remote status detection, power control, small/large ice mode switching, and UV button triggering.
+This is an ESPHome firmware project for integrating a Chang Hong `CH-Z6Y3` ice maker into Home Assistant. It uses an ESP32-C3 connected to the original five-wire control panel, enabling remote status detection, power control, small/large ice mode switching, and UV button triggering.
 
-This project uses a direct-GPIO wiring method that has been tested on the target machine. It is useful for this specific retrofit and debugging setup, but it is not a universal safe electrical interface. For long-term production-style use, add current limiting, voltage clamps, or an isolated front end for every signal line.
+This project uses a direct-GPIO wiring method that has been tested on `CH-Z6Y3`. It is useful for the confirmed model retrofit and debugging setup, but it is not a universal safe electrical interface. For long-term production-style use, add current limiting, voltage clamps, or an isolated front end for every signal line.
 
 ## Related Repository
 
 This repository focuses on the ESPHome / Home Assistant firmware implementation. For electrical details of the five-wire panel, the reverse-engineering capture process, confirmed netlist, schematics, and PCB trace diagrams, see [ice_panel_sniffer](https://github.com/Ljzd-PRO/ice_panel_sniffer).
+
+## Supported Models
+
+| Item | Details |
+| --- | --- |
+| Confirmed model | Chang Hong `CH-Z6Y3` |
+| Panel type | Original five-wire `P1-P5` control panel |
+| Panel features | No Water, Ice Full, Power, Small Ice, and Large Ice LEDs, plus Power and Select buttons |
+| Panel netlist | Matches the five-wire netlist documented in [ice_panel_sniffer](https://github.com/Ljzd-PRO/ice_panel_sniffer) |
+
+Other Chang Hong models should be treated as unverified even if the external panel looks similar. Before reusing this firmware, verify the `P1-P5` netlist, LED/button branches, default Large Ice startup behavior, and standby/small/large ADC signatures.
 
 ## Author And Project
 
@@ -42,8 +53,8 @@ ESPHome's `project.name` field follows the `author_name.project_name` convention
   - `starting`
   - `stopping`
   - `unknown`
-- Exposes Home Assistant diagnostic entities such as action state, fast state candidate, feature scores, ADC signature, confidence, and raw P1-P5 values.
-- Exposes firmware and ESPHome build version diagnostic entities for OTA verification.
+- Exposes Home Assistant diagnostic entities such as target model, action state, fast state candidate, feature scores, ADC signature, confidence, and raw P1-P5 values.
+- Exposes target model, firmware, and ESPHome build version diagnostic entities for OTA verification.
 - Supports ESPHome Native API, OTA, serial logs, Fallback AP provisioning, and BLE Improv provisioning.
 
 ## How It Works
@@ -248,8 +259,9 @@ Full diagnostic entity IDs use the `chang_hong_ice_maker_esphome_` prefix. For e
 | `Standby Blink Score` | Slow-window fallback | Score for the slow power-LED blink pattern. Higher values indicate a stronger standby signature. |
 | `Standby Window Valid` | Slow-window fallback | Whether the 16-second slow window currently confirms standby blink behavior. When it is on, standby classification is usually more reliable. |
 | `P1 Raw` - `P5 Raw` | Raw sampling | Raw ADC readings for P1-P5, roughly `0-4095`. With direct floating GPIO wiring, these are only relative readings and must not be converted to real voltages. |
-| `Firmware Version` | Version info | Project firmware version from `project_version` in YAML. |
-| `ESPHome Version` | Version info | ESPHome build version running on the device, useful after OTA updates. |
+| `Target Model` | Model and version | Confirmed supported model declared by this firmware. The main firmware should report `CH-Z6Y3`. |
+| `Firmware Version` | Model and version | Project firmware version from `project_version` in YAML. |
+| `ESPHome Version` | Model and version | ESPHome build version running on the device, useful after OTA updates. |
 
 If `Classified State` stays `unknown` and `Confidence`, `Fast Ratio 0HHHH`, `Fast Ratio MHMHH`, and `Standby Blink Score` all remain low, check P1-P5 wiring, GPIO mapping, and the actual ice-maker state.
 
@@ -376,6 +388,7 @@ action_result         latest action result
 
 ## Limitations
 
+- Wiring, thresholds, and state-machine rules are based on Chang Hong `CH-Z6Y3` testing; other models require panel-netlist and state-signature validation.
 - The current direct-GPIO design has electrical risk; ESP32-C3 GPIOs may see panel voltages above 3.3V.
 - This project does not provide reliable Home Assistant entities for no-water or ice-full status.
 - UV has no panel feedback, so it is exposed as a button rather than a real state switch. Repeated clicks are queued as toggle actions, but the firmware cannot know the final real UV state.
