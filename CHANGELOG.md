@@ -8,7 +8,7 @@
 
 升级后，Home Assistant 诊断区会新增 `Target Model`，用于显示当前固件声明的适配机型。主固件应显示 `CH-Z6Y3`。如果设备已经接入 HA，通常不需要重新添加设备；新诊断实体可能需要等待 ESPHome 重新发现实体或在 HA 中刷新设备。
 
-GitHub Release 中自动附带的固件产物使用 CI 占位 Wi-Fi、OTA 和 API encryption secrets 构建，只适合编译验证和二次构建参考。实际安装建议在本地 `secrets.yaml` 中写入自己的 Wi-Fi、`api_encryption_key` 和 `ota_password` 后自行编译刷机。
+GitHub Release 中自动附带的固件产物现在作为普通用户的首选安装方式，可直接下载 `factory.bin` 刷入 ESP32-C3。Release 固件使用公开固定的 Fallback AP 密码、API encryption key 和 OTA 密码；如果需要私有凭据，可在本地 `secrets.yaml` 中写入自己的配置后自行编译刷机。
 
 ### 新增
 
@@ -18,6 +18,7 @@ GitHub Release 中自动附带的固件产物使用 CI 占位 Wi-Fi、OTA 和 AP
 ### 变更
 
 - README 和英文 README 重新按 GitHub 用户阅读路径组织，突出适配机型、接线、刷机、配网、Home Assistant 添加、使用方式和排障信息。
+- README 增加 Release 固件安装流程，并将其列为首选刷机方式。
 - `CHANGE_LOG.md` 改名为 `CHANGELOG.md`，并将更新日志内容改为中文。
 - 更新固件注释和 README 兼容性说明，明确已验证目标机型为 `CH-Z6Y3`；不改变节点名、项目 ID、组件名或已有 Home Assistant 实体 ID。
 

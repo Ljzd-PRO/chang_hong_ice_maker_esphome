@@ -89,6 +89,48 @@ P5 -> GPIO4
 
 建议在 ESP32-C3 未连接制冰机时完成首次刷机。
 
+### 首选：使用 Release 固件
+
+普通用户建议直接使用 GitHub Release 中已经构建好的固件，不需要安装 ESPHome 或本地编译。
+
+1. 打开 [Latest Release](https://github.com/Ljzd-PRO/chang_hong_ice_maker_esphome/releases/latest)。
+2. 下载 `chang-hong-ice-maker-esphome.factory.bin`。
+3. 使用支持 Web Serial 的 Chrome 或 Edge 打开 `https://web.esphome.io/`。
+4. 连接 ESP32-C3，选择本地 `factory.bin` 文件刷入。
+5. 刷机完成后断开 USB，再按“配网”章节让设备接入家庭 Wi-Fi。
+
+如果 ESPHome Web 不可用，也可以使用 `esptool.py` 刷入：
+
+```sh
+python3 -m pip install esptool
+esptool.py --chip esp32c3 --port /dev/cu.usbmodemXXXX --baud 460800 \
+  write_flash 0x0 chang-hong-ice-maker-esphome.factory.bin
+```
+
+Release 中常见文件用途：
+
+| 文件 | 用途 |
+| --- | --- |
+| `chang-hong-ice-maker-esphome.factory.bin` | 首次 USB/串口刷机，普通用户首选。 |
+| `chang-hong-ice-maker-esphome.ota.bin` | 后续 OTA 更新镜像，适合支持 ESPHome OTA 二进制上传的工具。 |
+| `chang-hong-ice-maker-esphome.bin` | 原始固件镜像，普通用户通常不用。 |
+| `chang-hong-ice-maker-esphome.build_info.json` | 构建元数据。 |
+| `SHA256SUMS` | 文件校验和。 |
+
+Release 固件使用公开固定凭据，便于用户直接刷机和配网：
+
+```yaml
+fallback_ap_password: "ci-fallback-password"
+api_encryption_key: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
+ota_password: "ci-ota-password"
+```
+
+这些值是公开的。只在可信家庭网络中使用通常足够方便；如果你希望使用私有 API key 和 OTA 密码，请按下面的源码方式自行编译刷机。
+
+### 高级：从源码编译刷机
+
+开发者或需要私有密钥的用户可以从源码编译。
+
 安装 ESPHome：
 
 ```sh
@@ -102,51 +144,36 @@ python3 -m venv .venv-esphome
 cp secrets.example.yaml secrets.yaml
 ```
 
-编辑 `secrets.yaml`：
-
-```yaml
-wifi_ssid: "YOUR_WIFI_SSID"
-wifi_password: "YOUR_WIFI_PASSWORD"
-fallback_ap_password: "CHANGE_ME_1234"
-api_encryption_key: "REPLACE_WITH_BASE64_32_BYTE_KEY"
-ota_password: "REPLACE_WITH_RANDOM_OTA_PASSWORD"
-```
-
-生成 API encryption key：
+编辑 `secrets.yaml`，并用下面的命令生成自己的 API encryption key：
 
 ```sh
 openssl rand -base64 32
 ```
 
-检查并编译：
-
-```sh
-.venv-esphome/bin/esphome config chang-hong-ice-maker-esphome.yaml
-.venv-esphome/bin/esphome compile chang-hong-ice-maker-esphome.yaml
-```
-
-首次 USB 刷机：
+检查、编译并首次 USB 刷机：
 
 ```sh
 ls -1 /dev/cu.usb* /dev/tty.usb*
+.venv-esphome/bin/esphome config chang-hong-ice-maker-esphome.yaml
+.venv-esphome/bin/esphome compile chang-hong-ice-maker-esphome.yaml
 .venv-esphome/bin/esphome run chang-hong-ice-maker-esphome.yaml --device /dev/cu.usbmodemXXXX
 ```
 
-后续 OTA：
+源码方式的后续 OTA：
 
 ```sh
 .venv-esphome/bin/esphome upload chang-hong-ice-maker-esphome.yaml --device chang-hong-ice-maker-esphome.local
 ```
 
-如果 mDNS 不稳定，把 `--device` 换成 ESP32-C3 的 IP 地址。
-
 ## 配网
 
 支持三种方式：
 
-1. 在 `secrets.yaml` 写入 Wi-Fi 后刷机。
+1. 预写 Wi-Fi：从源码编译时，可以在 `secrets.yaml` 中写入 Wi-Fi 后刷机。
 2. Fallback AP：设备连不上 Wi-Fi 约 90 秒后，连接 `ChangHongIceMakerESPHome AP`，打开 `http://192.168.4.1/` 配网。
 3. BLE Improv：设备连不上 Wi-Fi 约 90 秒后，用支持 Web Bluetooth 的 Chrome/Edge 打开 `https://www.improv-wifi.com/`，选择 `chang-hong-ice-maker-esphome` 配网。
+
+使用 Release 固件时，通常使用 Fallback AP 或 BLE Improv 配网；Fallback AP 密码是 `ci-fallback-password`。
 
 蓝牙只用于配网，日常控制走 Wi-Fi 上的 ESPHome Native API。固件会把成功连接的 Wi-Fi 凭据保存到固定位置，OTA 更新后不应丢失配网。
 
@@ -157,7 +184,8 @@ ls -1 /dev/cu.usb* /dev/tty.usb*
 3. 如果自动发现 `Chang Hong Ice Maker ESPHome`，直接添加。
 4. 如果没有自动发现，手动添加 `ESPHome` 集成。
 5. Host 填 `chang-hong-ice-maker-esphome.local` 或 ESP32-C3 的 IP。
-6. 输入 `secrets.yaml` 中的 `api_encryption_key`。
+6. 如果使用 Release 固件，输入公开固定 key：`AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=`。
+7. 如果是源码自编译固件，输入你自己的 `secrets.yaml` 中的 `api_encryption_key`。
 
 主实体：
 

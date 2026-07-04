@@ -89,6 +89,48 @@ Powering matters. After `P1-P5` are connected, use a two-prong USB-C adapter or 
 
 Flash the ESP32-C3 before connecting it to the ice maker.
 
+### Recommended: Use Release Firmware
+
+Most users should use the prebuilt firmware from GitHub Releases. This does not require installing ESPHome or compiling locally.
+
+1. Open the [Latest Release](https://github.com/Ljzd-PRO/chang_hong_ice_maker_esphome/releases/latest).
+2. Download `chang-hong-ice-maker-esphome.factory.bin`.
+3. Open `https://web.esphome.io/` in a Web Serial capable Chrome or Edge browser.
+4. Connect the ESP32-C3 and flash the local `factory.bin` file.
+5. After flashing, disconnect USB and provision Wi-Fi as described below.
+
+If ESPHome Web is unavailable, flash with `esptool.py`:
+
+```sh
+python3 -m pip install esptool
+esptool.py --chip esp32c3 --port /dev/cu.usbmodemXXXX --baud 460800 \
+  write_flash 0x0 chang-hong-ice-maker-esphome.factory.bin
+```
+
+Release artifacts:
+
+| File | Purpose |
+| --- | --- |
+| `chang-hong-ice-maker-esphome.factory.bin` | First USB/serial flash image. Recommended for most users. |
+| `chang-hong-ice-maker-esphome.ota.bin` | OTA update image for tools that support ESPHome OTA binary upload. |
+| `chang-hong-ice-maker-esphome.bin` | Raw firmware image. Most users do not need it. |
+| `chang-hong-ice-maker-esphome.build_info.json` | Build metadata. |
+| `SHA256SUMS` | Artifact checksums. |
+
+Release firmware uses fixed public credentials so it can be flashed and provisioned directly:
+
+```yaml
+fallback_ap_password: "ci-fallback-password"
+api_encryption_key: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
+ota_password: "ci-ota-password"
+```
+
+These values are public. They are convenient on a trusted home network. If you want private API and OTA credentials, build from source instead.
+
+### Advanced: Build From Source
+
+Use this path if you are developing the firmware or want private credentials.
+
 Install ESPHome:
 
 ```sh
@@ -102,51 +144,36 @@ Create secrets:
 cp secrets.example.yaml secrets.yaml
 ```
 
-Edit `secrets.yaml`:
-
-```yaml
-wifi_ssid: "YOUR_WIFI_SSID"
-wifi_password: "YOUR_WIFI_PASSWORD"
-fallback_ap_password: "CHANGE_ME_1234"
-api_encryption_key: "REPLACE_WITH_BASE64_32_BYTE_KEY"
-ota_password: "REPLACE_WITH_RANDOM_OTA_PASSWORD"
-```
-
-Generate an API encryption key:
+Edit `secrets.yaml`, then generate your own API encryption key:
 
 ```sh
 openssl rand -base64 32
 ```
 
-Validate and compile:
-
-```sh
-.venv-esphome/bin/esphome config chang-hong-ice-maker-esphome.yaml
-.venv-esphome/bin/esphome compile chang-hong-ice-maker-esphome.yaml
-```
-
-Initial USB flash:
+Validate, compile, and flash over USB:
 
 ```sh
 ls -1 /dev/cu.usb* /dev/tty.usb*
+.venv-esphome/bin/esphome config chang-hong-ice-maker-esphome.yaml
+.venv-esphome/bin/esphome compile chang-hong-ice-maker-esphome.yaml
 .venv-esphome/bin/esphome run chang-hong-ice-maker-esphome.yaml --device /dev/cu.usbmodemXXXX
 ```
 
-Future OTA updates:
+Future OTA updates with the source build:
 
 ```sh
 .venv-esphome/bin/esphome upload chang-hong-ice-maker-esphome.yaml --device chang-hong-ice-maker-esphome.local
 ```
 
-If mDNS is unreliable, use the ESP32-C3 IP address for `--device`.
-
 ## Wi-Fi Provisioning
 
 Supported methods:
 
-1. Put Wi-Fi credentials in `secrets.yaml` before flashing.
+1. Preconfigured Wi-Fi: with a source build, Wi-Fi credentials can be written into `secrets.yaml` before flashing.
 2. Fallback AP: after about 90 seconds without Wi-Fi, connect to `ChangHongIceMakerESPHome AP` and open `http://192.168.4.1/`.
 3. BLE Improv: after about 90 seconds without Wi-Fi, open `https://www.improv-wifi.com/` in a Web Bluetooth capable Chrome/Edge browser and select `chang-hong-ice-maker-esphome`.
+
+With release firmware, use Fallback AP or BLE Improv provisioning. The Fallback AP password is `ci-fallback-password`.
 
 Bluetooth is used only for provisioning. Daily control uses ESPHome Native API over Wi-Fi. Successful Wi-Fi credentials are stored in a fixed location so OTA updates should not erase provisioning.
 
@@ -157,7 +184,8 @@ Bluetooth is used only for provisioning. Daily control uses ESPHome Native API o
 3. If `Chang Hong Ice Maker ESPHome` is discovered automatically, add it.
 4. Otherwise, add the `ESPHome` integration manually.
 5. Use `chang-hong-ice-maker-esphome.local` or the ESP32-C3 IP address as Host.
-6. Enter the `api_encryption_key` from `secrets.yaml`.
+6. If using release firmware, enter the fixed public key: `AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=`.
+7. If using a source build, enter your own `api_encryption_key` from `secrets.yaml`.
 
 Main entities:
 
