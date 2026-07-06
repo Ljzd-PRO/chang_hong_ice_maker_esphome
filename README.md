@@ -343,4 +343,4 @@ action_result         最近动作结果
 
 ## 许可证
 
-BSD 3-Clause，见 [LICENSE.txt](LICENSE.txt)。
+BSD 3-Clause，见 [LICENSE](LICENSE)。

@@ -343,4 +343,4 @@ For code, classifier, or documentation contributions, see [CONTRIBUTING.md](CONT
 
 ## License
 
-BSD 3-Clause. See [LICENSE.txt](LICENSE.txt).
+BSD 3-Clause. See [LICENSE](LICENSE).
