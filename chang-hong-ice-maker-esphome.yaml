@@ -5,7 +5,7 @@
 substitutions:
   name: chang-hong-ice-maker-esphome
   friendly_name: Chang Hong Ice Maker ESPHome
-  project_version: "1.0.0"
+  project_version: "1.0.1"
   target_model: "CH-Z6Y3"
 
 esphome:
@@ -225,6 +225,7 @@ text_sensor:
     name: Classified State
     icon: mdi:state-machine
     entity_category: diagnostic
+    disabled_by_default: true
     update_interval: 5s
     lambda: |-
       return {id(chang_hong_ice_maker_esphome_core).classified_state_text()};
@@ -234,6 +235,7 @@ text_sensor:
     name: Fast State Candidate
     icon: mdi:state-machine
     entity_category: diagnostic
+    disabled_by_default: true
     update_interval: 5s
     lambda: |-
       return {id(chang_hong_ice_maker_esphome_core).fast_state_candidate_text()};
@@ -243,6 +245,7 @@ text_sensor:
     name: Feature State Candidate
     icon: mdi:state-machine
     entity_category: diagnostic
+    disabled_by_default: true
     update_interval: 5s
     lambda: |-
       return {id(chang_hong_ice_maker_esphome_core).feature_state_candidate_text()};
@@ -252,6 +255,7 @@ text_sensor:
     name: ADC Signature
     icon: mdi:pulse
     entity_category: diagnostic
+    disabled_by_default: true
     update_interval: 5s
     lambda: |-
       return {id(chang_hong_ice_maker_esphome_core).signature_text()};
@@ -261,6 +265,7 @@ text_sensor:
     name: Action State
     icon: mdi:progress-clock
     entity_category: diagnostic
+    disabled_by_default: true
     update_interval: 1s
     lambda: |-
       return {id(chang_hong_ice_maker_esphome_core).action_state_text()};
@@ -270,6 +275,7 @@ text_sensor:
     name: Action Result
     icon: mdi:clipboard-pulse-outline
     entity_category: diagnostic
+    disabled_by_default: true
     update_interval: 1s
     lambda: |-
       return {id(chang_hong_ice_maker_esphome_core).action_result_text()};
@@ -282,6 +288,7 @@ sensor:
     unit_of_measurement: "%"
     accuracy_decimals: 1
     entity_category: diagnostic
+    disabled_by_default: true
     update_interval: 5s
     lambda: |-
       return id(chang_hong_ice_maker_esphome_core).confidence();
@@ -293,6 +300,7 @@ sensor:
     unit_of_measurement: "%"
     accuracy_decimals: 1
     entity_category: diagnostic
+    disabled_by_default: true
     update_interval: 5s
     lambda: |-
       return id(chang_hong_ice_maker_esphome_core).blink_score();
@@ -304,6 +312,7 @@ sensor:
     unit_of_measurement: "%"
     accuracy_decimals: 1
     entity_category: diagnostic
+    disabled_by_default: true
     update_interval: 5s
     lambda: |-
       return id(chang_hong_ice_maker_esphome_core).ratio_large_signature();
@@ -315,6 +324,7 @@ sensor:
     unit_of_measurement: "%"
     accuracy_decimals: 1
     entity_category: diagnostic
+    disabled_by_default: true
     update_interval: 5s
     lambda: |-
       return id(chang_hong_ice_maker_esphome_core).ratio_mhmhh_signature();
@@ -325,6 +335,7 @@ sensor:
     icon: mdi:counter
     accuracy_decimals: 0
     entity_category: diagnostic
+    disabled_by_default: true
     update_interval: 5s
     lambda: |-
       return id(chang_hong_ice_maker_esphome_core).small_feature_score();
@@ -335,6 +346,7 @@ sensor:
     icon: mdi:counter
     accuracy_decimals: 0
     entity_category: diagnostic
+    disabled_by_default: true
     update_interval: 5s
     lambda: |-
       return id(chang_hong_ice_maker_esphome_core).standby_feature_score();
@@ -345,6 +357,7 @@ sensor:
     icon: mdi:sigma
     accuracy_decimals: 1
     entity_category: diagnostic
+    disabled_by_default: true
     update_interval: 5s
     lambda: |-
       return id(chang_hong_ice_maker_esphome_core).p2_stddev();
@@ -355,6 +368,7 @@ sensor:
     icon: mdi:delta
     accuracy_decimals: 1
     entity_category: diagnostic
+    disabled_by_default: true
     update_interval: 5s
     lambda: |-
       return id(chang_hong_ice_maker_esphome_core).delta_p2_p4();
@@ -365,6 +379,7 @@ sensor:
     icon: mdi:delta
     accuracy_decimals: 1
     entity_category: diagnostic
+    disabled_by_default: true
     update_interval: 5s
     lambda: |-
       return id(chang_hong_ice_maker_esphome_core).delta_p5_p2();
@@ -375,6 +390,7 @@ sensor:
     icon: mdi:sine-wave
     accuracy_decimals: 0
     entity_category: diagnostic
+    disabled_by_default: true
     update_interval: 5s
     lambda: |-
       return id(chang_hong_ice_maker_esphome_core).raw_p1();
@@ -385,6 +401,7 @@ sensor:
     icon: mdi:sine-wave
     accuracy_decimals: 0
     entity_category: diagnostic
+    disabled_by_default: true
     update_interval: 5s
     lambda: |-
       return id(chang_hong_ice_maker_esphome_core).raw_p2();
@@ -395,6 +412,7 @@ sensor:
     icon: mdi:sine-wave
     accuracy_decimals: 0
     entity_category: diagnostic
+    disabled_by_default: true
     update_interval: 5s
     lambda: |-
       return id(chang_hong_ice_maker_esphome_core).raw_p3();
@@ -405,6 +423,7 @@ sensor:
     icon: mdi:sine-wave
     accuracy_decimals: 0
     entity_category: diagnostic
+    disabled_by_default: true
     update_interval: 5s
     lambda: |-
       return id(chang_hong_ice_maker_esphome_core).raw_p4();
@@ -415,6 +434,7 @@ sensor:
     icon: mdi:sine-wave
     accuracy_decimals: 0
     entity_category: diagnostic
+    disabled_by_default: true
     update_interval: 5s
     lambda: |-
       return id(chang_hong_ice_maker_esphome_core).raw_p5();

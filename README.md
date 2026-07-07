@@ -241,6 +241,9 @@ sensor.chang_hong_ice_maker_esphome_state
 ## 诊断实体
 
 诊断实体用于排查接线、状态识别和远程按键，不建议作为普通自动化的真实状态来源。
+高频诊断实体在固件中默认禁用，避免 Home Assistant recorder 长期保存大量 ADC、ratio、score、delta 等调试数据。需要排查问题时，可以在 HA 的设备页面手动启用对应实体；排查结束后建议再禁用。
+
+如果这些实体已经在旧版本中被 HA 添加并启用，OTA 后 HA 可能保留原有启用状态。此时需要在 HA 中手动禁用，或在 `recorder` 中排除相关实体。
 
 | 实体 | 用途 |
 | --- | --- |
