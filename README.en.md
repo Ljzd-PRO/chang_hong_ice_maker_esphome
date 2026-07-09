@@ -243,6 +243,8 @@ If the state stays `unknown`, check `P1-P5` order, whether P3/GPIO2 affects boot
 Diagnostic entities are for wiring checks, state detection, and remote-button troubleshooting. Do not use them as the main state source for normal automations.
 High-frequency diagnostic entities are disabled by default in the firmware to avoid filling the Home Assistant recorder database with ADC, ratio, score, and delta debug data. Enable only the entities you need from the HA device page while troubleshooting, then disable them again.
 
+For complete capture procedures, see the [debugging and capture guide](docs/debugging-guide.en.md).
+
 If these entities were already added and enabled by an older firmware, HA may keep the existing enabled state after OTA. Disable them manually in HA or exclude them in `recorder` if you need an immediate database reduction.
 
 | Entity | Purpose |
@@ -296,6 +298,8 @@ Use USB logs only when `P1-P5` are disconnected or USB is isolated. With the pan
 ```sh
 .venv-esphome/bin/esphome logs chang-hong-ice-maker-esphome.yaml --device chang-hong-ice-maker-esphome.local
 ```
+
+To save standard-firmware logs or switch to the debug firmware for D1-D4 raw frames, follow the [debugging and capture guide](docs/debugging-guide.en.md).
 
 Common fields:
 
