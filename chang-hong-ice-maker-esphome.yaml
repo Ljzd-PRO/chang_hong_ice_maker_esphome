@@ -5,7 +5,7 @@
 substitutions:
   name: chang-hong-ice-maker-esphome
   friendly_name: Chang Hong Ice Maker ESPHome
-  project_version: "1.0.1"
+  project_version: "1.1.0"
   target_model: "CH-Z6Y3"
 
 esphome:

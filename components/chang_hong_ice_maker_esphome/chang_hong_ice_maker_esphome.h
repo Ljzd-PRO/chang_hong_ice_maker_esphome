@@ -6,6 +6,7 @@
 #include "esphome/components/wifi/wifi_component.h"
 #include "esphome/core/component.h"
 #include "esphome/core/preferences.h"
+#include "power_target_queue.h"
 
 #include <array>
 #include <cstdint>
@@ -83,6 +84,7 @@ class ChangHongIceMakerESPHome : public Component {
   static constexpr uint32_t RECENT_EVENT_VISIBLE_MS = 5000;
   static constexpr uint32_t SHORT_PRESS_COOLDOWN_MS = 800;
   static constexpr uint32_t UV_COOLDOWN_MS = 1500;
+  static constexpr uint8_t POWER_QUEUE_MAX = 4;
   static constexpr uint8_t UV_QUEUE_MAX = 4;
   static constexpr float LARGE_SIGNATURE_THRESHOLD = 65.0f;
   static constexpr float MHMHH_SIGNATURE_THRESHOLD = 55.0f;
@@ -162,6 +164,7 @@ class ChangHongIceMakerESPHome : public Component {
   void restore_panel_inputs_();
   bool start_pulse_(PulseKind kind, uint8_t pin_index, uint32_t duration_ms);
   void finish_pulse_();
+  void service_power_queue_();
   void service_pending_mode_();
   void service_uv_queue_();
   void sample_once_();
@@ -184,6 +187,8 @@ class ChangHongIceMakerESPHome : public Component {
   bool optimistic_active_() const;
   bool cooldown_active_() const;
   bool command_active_() const;
+  bool dispatch_power_target_(bool target_on);
+  bool queued_power_target_(bool *target_on) const;
   bool set_pending_mode_target_(PendingMode target);
   void record_event_(const std::string &event);
   static const char *state_to_cstr_(PanelState state);
@@ -234,6 +239,7 @@ class ChangHongIceMakerESPHome : public Component {
   uint32_t pulse_duration_ms_{0};
   uint32_t pulse_ends_ms_{0};
   uint32_t cooldown_until_ms_{0};
+  PowerTargetQueue<POWER_QUEUE_MAX> power_target_queue_{};
   uint8_t uv_toggle_queue_{0};
 
   OptimisticKind optimistic_kind_{OptimisticKind::NONE};

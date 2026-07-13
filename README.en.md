@@ -217,6 +217,8 @@ Small Ice cannot be selected while standby. If `Large Ice` is turned off during 
 
 Turn off `Power`. The firmware simulates the original Power short press and returns the machine to standby.
 
+Repeated `Power` changes are queued in click order, with up to four pending targets. Consecutive duplicate targets are coalesced. The Home Assistant switch shows the last queued target, which represents the final requested state. Each item waits for panel-state confirmation of the previous item; do not use this feature for continuous rapid cycling of the ice maker.
+
 ### UV Sterilization
 
 Click `UV Toggle`. The firmware simulates a long Select press for about 5 seconds.
@@ -326,7 +328,7 @@ action_result         latest action result
 - Direct GPIO has electrical risk. Panel voltages may exceed ESP32-C3 GPIO limits.
 - No reliable Home Assistant entities are provided for No Water or Ice Full.
 - UV has no state feedback and is exposed only as a toggle button.
-- If Home Assistant sends conflicting commands too quickly, the firmware refuses some power/ice-size requests to protect the original panel scan.
+- Power targets are queued in order, up to four pending items; new requests are refused when the queue is full. Ice-size requests are still refused while the power queue is active.
 - Only `CH-Z6Y3` is declared as verified. Other models require validation.
 
 ## Reverse-Engineering Data

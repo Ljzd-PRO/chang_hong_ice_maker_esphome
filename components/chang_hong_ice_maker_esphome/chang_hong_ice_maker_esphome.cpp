@@ -35,6 +35,7 @@ void ChangHongIceMakerESPHome::setup() {
            SMALL_P2_STDDEV_MAX, SMALL_DELTA_P2_P4_MIN, SMALL_DELTA_P5_P2_MAX,
            STANDBY_P2_STDDEV_MIN, STANDBY_DELTA_P2_P4_MAX, STANDBY_DELTA_P5_P2_MIN,
            FEATURE_CONFIRM_COUNT);
+  ESP_LOGI(TAG, "Command queues: power targets=%u, UV toggles=%u", POWER_QUEUE_MAX, UV_QUEUE_MAX);
   ESP_LOGW(TAG, "Direct floating GPIO mode is accepted-risk; keep panel pins input-only except explicit pulses");
 }
 
@@ -58,6 +59,7 @@ void ChangHongIceMakerESPHome::loop() {
     this->finish_pulse_();
   }
 
+  this->service_power_queue_();
   this->service_pending_mode_();
   this->service_uv_queue_();
 
@@ -80,56 +82,52 @@ void ChangHongIceMakerESPHome::loop() {
 }
 
 bool ChangHongIceMakerESPHome::request_power(bool target_on) {
-  if (this->pulse_active_) {
-    this->record_event_(std::string("refused_pulse_") + pulse_to_action_cstr_(this->pulse_kind_));
-    ESP_LOGW(TAG, "Power request ignored: pulse already active (%s)", pulse_to_action_cstr_(this->pulse_kind_));
-    return false;
+  bool scheduled_target = false;
+  bool scheduled_known = this->queued_power_target_(&scheduled_target);
+  if (!scheduled_known && this->optimistic_kind_ == OptimisticKind::POWER && this->optimistic_active_()) {
+    scheduled_target = this->optimistic_power_on_;
+    scheduled_known = true;
+  }
+  if (!scheduled_known && this->power_known()) {
+    scheduled_target = this->power_on();
+    scheduled_known = true;
   }
 
-  if (this->optimistic_active_()) {
-    const bool pending_on = this->power_on();
-    if (pending_on == target_on) {
-      this->record_event_("accepted_already_pending");
-      ESP_LOGI(TAG, "Power request %s is already pending confirmation", target_on ? "ON" : "OFF");
-      return true;
-    }
-    this->record_event_("refused_pending_confirmation");
-    ESP_LOGW(TAG, "Power request %s refused: previous action is still pending confirmation",
-             target_on ? "ON" : "OFF");
-    return false;
-  }
-
-  const bool known = this->power_known();
-  const bool current_on = this->power_on();
-  if (!known) {
+  if (!scheduled_known) {
     this->record_event_("refused_unknown_state");
     ESP_LOGW(TAG, "Power request %s refused: current state is unknown", target_on ? "ON" : "OFF");
     return false;
   }
-  if (current_on == target_on) {
-    this->record_event_("accepted_already_satisfied");
-    ESP_LOGI(TAG, "Power request %s is already satisfied", target_on ? "ON" : "OFF");
+
+  if (scheduled_target == target_on) {
+    this->record_event_("accepted_power_already_scheduled");
+    ESP_LOGI(TAG, "Power request %s is already the final scheduled target", target_on ? "ON" : "OFF");
     return true;
   }
 
-  if (!this->start_pulse_(PulseKind::SW1_OD, 1, 100)) {
+  if (!this->power_target_queue_.push(target_on)) {
+    this->record_event_("refused_power_queue_full");
+    ESP_LOGW(TAG, "Power request %s refused: queue is full (%u)", target_on ? "ON" : "OFF",
+             static_cast<unsigned>(this->power_target_queue_.size()));
     return false;
   }
 
-  const uint32_t now = millis();
-  this->optimistic_kind_ = OptimisticKind::POWER;
-  this->optimistic_power_on_ = target_on;
-  this->optimistic_mode_ = target_on ? PendingMode::LARGE : PendingMode::NONE;
-  this->pending_mode_after_power_on_ = PendingMode::NONE;
-  this->optimistic_state_ = target_on ? PanelState::STARTING : PanelState::STOPPING;
-  this->optimistic_until_ms_ = now + 35000;
-  this->exposed_state_ = this->optimistic_state_;
-  ESP_LOGI(TAG, "Power optimistic state=%s until classifier confirms or times out; startup default is Large Ice",
-           target_on ? "ON" : "OFF");
+  this->record_event_(std::string("queued_power_") + (target_on ? "on_" : "off_") +
+                      std::to_string(this->power_target_queue_.size()));
+  ESP_LOGI(TAG, "Power request %s queued; pending=%u", target_on ? "ON" : "OFF",
+           static_cast<unsigned>(this->power_target_queue_.size()));
+  this->service_power_queue_();
   return true;
 }
 
 bool ChangHongIceMakerESPHome::request_large_ice(bool target_large) {
+  if (!this->power_target_queue_.empty()) {
+    this->record_event_("refused_power_queue_active");
+    ESP_LOGW(TAG, "Size request ignored: power queue has %u pending target(s)",
+             static_cast<unsigned>(this->power_target_queue_.size()));
+    return false;
+  }
+
   if (this->pulse_active_) {
     this->record_event_(std::string("refused_pulse_") + pulse_to_action_cstr_(this->pulse_kind_));
     ESP_LOGW(TAG, "Size request ignored: pulse already active (%s)", pulse_to_action_cstr_(this->pulse_kind_));
@@ -249,6 +247,9 @@ bool ChangHongIceMakerESPHome::power_known() const {
 }
 
 bool ChangHongIceMakerESPHome::power_on() const {
+  if (!this->power_target_queue_.empty()) {
+    return this->power_target_queue_.back();
+  }
   if (this->optimistic_kind_ == OptimisticKind::POWER &&
       static_cast<int32_t>(millis() - this->optimistic_until_ms_) < 0) {
     return this->optimistic_power_on_;
@@ -325,14 +326,21 @@ std::string ChangHongIceMakerESPHome::action_state_text() const {
   if (this->pulse_active_) {
     return std::string("pulse_") + pulse_to_action_cstr_(this->pulse_kind_);
   }
-  if (this->uv_toggle_queue_ > 0) {
-    return std::string("queued_uv_") + std::to_string(this->uv_toggle_queue_);
-  }
   if (this->pending_mode_after_power_on_ != PendingMode::NONE) {
     return std::string("pending_start_") + pending_mode_to_cstr_(this->pending_mode_after_power_on_);
   }
   if (this->optimistic_active_()) {
-    return std::string("confirming_") + state_to_cstr_(this->optimistic_state_);
+    std::string state = std::string("confirming_") + state_to_cstr_(this->optimistic_state_);
+    if (!this->power_target_queue_.empty()) {
+      state += std::string("_queued_power_") + std::to_string(this->power_target_queue_.size());
+    }
+    return state;
+  }
+  if (!this->power_target_queue_.empty()) {
+    return std::string("queued_power_") + std::to_string(this->power_target_queue_.size());
+  }
+  if (this->uv_toggle_queue_ > 0) {
+    return std::string("queued_uv_") + std::to_string(this->uv_toggle_queue_);
   }
   if ((this->last_event_.rfind("refused_", 0) == 0 || this->last_event_.rfind("timeout_", 0) == 0) &&
       static_cast<uint32_t>(millis() - this->last_event_ms_) < RECENT_EVENT_VISIBLE_MS) {
@@ -347,7 +355,7 @@ std::string ChangHongIceMakerESPHome::action_result_text() const {
 
 bool ChangHongIceMakerESPHome::action_busy() const {
   return this->pulse_active_ || this->pending_mode_after_power_on_ != PendingMode::NONE ||
-         this->optimistic_active_() || this->uv_toggle_queue_ > 0;
+         this->optimistic_active_() || !this->power_target_queue_.empty() || this->uv_toggle_queue_ > 0;
 }
 
 void ChangHongIceMakerESPHome::setup_fixed_wifi_preferences_() {
@@ -528,6 +536,39 @@ void ChangHongIceMakerESPHome::finish_pulse_() {
            finished == PulseKind::SW2_HOLD_OD ? UV_COOLDOWN_MS : SHORT_PRESS_COOLDOWN_MS);
 }
 
+void ChangHongIceMakerESPHome::service_power_queue_() {
+  if (this->power_target_queue_.empty() || this->pulse_active_ || this->cooldown_active_() ||
+      this->pending_mode_after_power_on_ != PendingMode::NONE || this->optimistic_active_()) {
+    return;
+  }
+
+  while (!this->power_target_queue_.empty()) {
+    const bool target_on = this->power_target_queue_.front();
+    const bool observed_known = this->exposed_state_ == PanelState::STANDBY || is_running_(this->exposed_state_);
+    if (!observed_known) {
+      return;
+    }
+
+    const bool observed_on = is_running_(this->exposed_state_);
+    if (observed_on == target_on) {
+      this->power_target_queue_.pop();
+      this->record_event_(std::string("skipped_power_") + (target_on ? "on" : "off") +
+                          "_already_satisfied");
+      ESP_LOGI(TAG, "Power queue skipped %s: observed state already satisfies target; remaining=%u",
+               target_on ? "ON" : "OFF", static_cast<unsigned>(this->power_target_queue_.size()));
+      continue;
+    }
+
+    if (!this->dispatch_power_target_(target_on)) {
+      return;
+    }
+    this->power_target_queue_.pop();
+    ESP_LOGI(TAG, "Power queue dispatched %s; remaining=%u", target_on ? "ON" : "OFF",
+             static_cast<unsigned>(this->power_target_queue_.size()));
+    return;
+  }
+}
+
 void ChangHongIceMakerESPHome::service_pending_mode_() {
   if (this->pending_mode_after_power_on_ == PendingMode::NONE || this->pulse_active_) {
     return;
@@ -570,7 +611,8 @@ void ChangHongIceMakerESPHome::service_uv_queue_() {
     return;
   }
 
-  if (this->pending_mode_after_power_on_ != PendingMode::NONE || this->optimistic_active_()) {
+  if (!this->power_target_queue_.empty() || this->pending_mode_after_power_on_ != PendingMode::NONE ||
+      this->optimistic_active_()) {
     return;
   }
 
@@ -1083,7 +1125,35 @@ bool ChangHongIceMakerESPHome::cooldown_active_() const {
 
 bool ChangHongIceMakerESPHome::command_active_() const {
   return this->pulse_active_ || this->pending_mode_after_power_on_ != PendingMode::NONE ||
-         this->optimistic_active_();
+         this->optimistic_active_() || !this->power_target_queue_.empty();
+}
+
+bool ChangHongIceMakerESPHome::dispatch_power_target_(bool target_on) {
+  if (!this->start_pulse_(PulseKind::SW1_OD, 1, 100)) {
+    return false;
+  }
+
+  const uint32_t now = millis();
+  this->optimistic_kind_ = OptimisticKind::POWER;
+  this->optimistic_power_on_ = target_on;
+  this->optimistic_mode_ = target_on ? PendingMode::LARGE : PendingMode::NONE;
+  this->pending_mode_after_power_on_ = PendingMode::NONE;
+  this->optimistic_state_ = target_on ? PanelState::STARTING : PanelState::STOPPING;
+  this->optimistic_until_ms_ = now + 35000;
+  this->exposed_state_ = this->optimistic_state_;
+  ESP_LOGI(TAG, "Power optimistic state=%s until classifier confirms or times out; startup default is Large Ice",
+           target_on ? "ON" : "OFF");
+  return true;
+}
+
+bool ChangHongIceMakerESPHome::queued_power_target_(bool *target_on) const {
+  if (this->power_target_queue_.empty()) {
+    return false;
+  }
+  if (target_on != nullptr) {
+    *target_on = this->power_target_queue_.back();
+  }
+  return true;
 }
 
 bool ChangHongIceMakerESPHome::set_pending_mode_target_(PendingMode target) {
